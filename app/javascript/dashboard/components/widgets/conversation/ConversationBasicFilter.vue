@@ -26,6 +26,13 @@ const { updateUISettings } = useUISettings();
 const chatStatusFilter = useMapGetter('getChatStatusFilter');
 const chatSortFilter = useMapGetter('getChatSortFilter');
 
+// --- ADICIONE ESTAS 5 LINHAS AQUI ---
+const currentUser = useMapGetter('getCurrentUser');
+const isAdmin = computed(() => {
+  return currentUser.value && currentUser.value.role === 'administrator';
+});
+// ------------------------------------
+
 const [showActionsDropdown, toggleDropdown] = useToggle();
 
 const currentStatusFilter = computed(() => {
@@ -38,28 +45,37 @@ const currentSortBy = computed(() => {
   );
 });
 
-const chatStatusOptions = computed(() => [
-  {
-    label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.open.TEXT'),
-    value: 'open',
-  },
-  {
-    label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.resolved.TEXT'),
-    value: 'resolved',
-  },
-  {
-    label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.pending.TEXT'),
-    value: 'pending',
-  },
-  {
-    label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.snoozed.TEXT'),
-    value: 'snoozed',
-  },
-  {
-    label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.all.TEXT'),
-    value: 'all',
-  },
-]);
+const chatStatusOptions = computed(() => {
+  const options = [
+    {
+      label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.open.TEXT'),
+      value: 'open',
+    },
+    {
+      label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.resolved.TEXT'),
+      value: 'resolved',
+    },
+    {
+      label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.pending.TEXT'),
+      value: 'pending',
+    },
+    {
+      label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.snoozed.TEXT'),
+      value: 'snoozed',
+    },
+  ];
+
+  // A mágica acontece aqui: só adiciona "Todos" se for admin
+  if (isAdmin.value) {
+    options.push({
+      label: t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.all.TEXT'),
+      value: 'all',
+    });
+  }
+
+  return options;
+});
+
 
 const chatSortOptions = computed(() => [
   {

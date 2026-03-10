@@ -193,16 +193,30 @@ const userPermissions = computed(() => {
 });
 
 const assigneeTabItems = computed(() => {
-  return filterItemsByPermission(
-    ASSIGNEE_TYPE_TAB_PERMISSIONS,
-    userPermissions.value,
-    item => item.permissions
-  ).map(({ key, count: countKey }) => ({
-    key,
-    name: t(`CHAT_LIST.ASSIGNEE_TYPE_TABS.${key}`),
-    count: conversationStats.value[countKey] || 0,
-  }));
+  const isAdmin = currentUser.value && currentUser.value.role === 'administrator';
+
+  if (isAdmin) {
+    // Mantém o painel original para os Administradores
+    return filterItemsByPermission(
+      ASSIGNEE_TYPE_TAB_PERMISSIONS,
+      userPermissions.value,
+      item => item.permissions
+    ).map(({ key, count: countKey }) => ({
+      key,
+      name: t(`CHAT_LIST.ASSIGNEE_TYPE_TABS.${key}`),
+      count: conversationStats.value[countKey] || 0,
+    }));
+  } else {
+    // Força os 3 botões fixos com os nomes que você pediu para os Agentes
+    return [
+      { key: 'me', name: 'Abertas', count: conversationStats.value['mineCount'] || 0 },
+      { key: 'unassigned', name: 'Pendentes', count: conversationStats.value['unAssignedCount'] || 0 },
+      { key: 'all', name: 'Finalizadas', count: 0 } 
+    ];
+  }
 });
+
+
 
 const showAssigneeInConversationCard = computed(() => {
   return (
@@ -264,10 +278,26 @@ const conversationListPagination = computed(() => {
 });
 
 const conversationFilters = computed(() => {
+  let mappedAssigneeType = activeAssigneeTab.value;
+  let mappedStatus = activeStatus.value;
+  const isAdmin = currentUser.value && currentUser.value.role === 'administrator';
+
+  // O pulo do gato: Forçamos o roteamento por baixo dos panos se for agente
+  if (!isAdmin) {
+    if (activeAssigneeTab.value === 'me') {
+      mappedStatus = 'open'; // Abertas -> força status open
+    } else if (activeAssigneeTab.value === 'unassigned') {
+      mappedStatus = 'open'; // Pendentes -> força status open
+    } else if (activeAssigneeTab.value === 'all') {
+      mappedAssigneeType = 'me'; // Finalizadas -> força puxar as "Meus"
+      mappedStatus = 'resolved'; // E força o status resolvido
+    }
+  }
+
   return {
     inboxId: props.conversationInbox ? props.conversationInbox : undefined,
-    assigneeType: activeAssigneeTab.value,
-    status: activeStatus.value,
+    assigneeType: mappedAssigneeType,
+    status: mappedStatus,
     sortBy: activeSortBy.value,
     page: conversationListPagination.value,
     labels: props.label ? [props.label] : undefined,
@@ -316,7 +346,12 @@ const conversationList = computed(() => {
 
   if (!hasAppliedFiltersOrActiveFolders.value) {
     const filters = conversationFilters.value;
-    if (activeAssigneeTab.value === 'me') {
+    const isAdmin = currentUser.value && currentUser.value.role === 'administrator';
+
+    if (!isAdmin && activeAssigneeTab.value === 'all') {
+       // Se o agente clicou em "Finalizadas", puxa o histórico apenas dele
+       localConversationList = [...mineChatsList.value(filters)];
+    } else if (activeAssigneeTab.value === 'me') {
       localConversationList = [...mineChatsList.value(filters)];
     } else if (activeAssigneeTab.value === 'unassigned') {
       localConversationList = [...unAssignedChatsList.value(filters)];
@@ -336,7 +371,6 @@ const conversationList = computed(() => {
 
   return localConversationList;
 });
-
 const showEndOfListMessage = computed(() => {
   return (
     conversationList.value.length &&
