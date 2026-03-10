@@ -46,7 +46,6 @@ import {
 } from 'dashboard/composables/useTransformKeys';
 import { useEmitter } from 'dashboard/composables/emitter';
 import { useConversationRequiredAttributes } from 'dashboard/composables/useConversationRequiredAttributes';
-
 import { emitter } from 'shared/helpers/mitt';
 
 import wootConstants from 'dashboard/constants/globals';
@@ -71,16 +70,38 @@ import { ASSIGNEE_TYPE_TAB_PERMISSIONS } from 'dashboard/constants/permissions.j
 const TAB_PAGE_SIZE = 25;
 
 const props = defineProps({
-  conversationInbox: { type: [String, Number], default: 0 },
-  teamId: { type: [String, Number], default: 0 },
-  label: { type: String, default: '' },
-  conversationType: { type: String, default: '' },
-  foldersId: { type: [String, Number], default: 0 },
-  showConversationList: { default: true, type: Boolean },
-  isOnExpandedLayout: { default: false, type: Boolean },
+  conversationInbox: {
+    type: [String, Number],
+    default: 0,
+  },
+  teamId: {
+    type: [String, Number],
+    default: 0,
+  },
+  label: {
+    type: String,
+    default: '',
+  },
+  conversationType: {
+    type: String,
+    default: '',
+  },
+  foldersId: {
+    type: [String, Number],
+    default: 0,
+  },
+  showConversationList: {
+    default: true,
+    type: Boolean,
+  },
+  isOnExpandedLayout: {
+    default: false,
+    type: Boolean,
+  },
 });
 
 const emit = defineEmits(['conversationLoad']);
+
 const { uiSettings } = useUISettings();
 const { t } = useI18n();
 const router = useRouter();
@@ -90,6 +111,7 @@ const store = useStore();
 const resolveAttributesModalRef = ref(null);
 const conversationListRef = ref(null);
 const virtualListRef = ref(null);
+
 let unsubscribeSocketBridge = null;
 
 provide('contextMenuElementTarget', virtualListRef);
@@ -104,6 +126,7 @@ const showAddFoldersModal = ref(false);
 const showDeleteFoldersModal = ref(false);
 const isContextMenuOpen = ref(false);
 const appliedFilter = ref([]);
+
 const advancedFilterTypes = ref(
   advancedFilterOptions.map(filter => ({
     ...filter,
@@ -182,7 +205,6 @@ const {
 const { checkMissingAttributes } = useConversationRequiredAttributes();
 
 // computed
-
 const hasAppliedFilters = computed(() => {
   return appliedFilters.value.length !== 0;
 });
@@ -229,7 +251,6 @@ function normalizeTeamMemberId(member) {
   if (typeof member === 'number' || typeof member === 'string') {
     return Number(member);
   }
-
   return Number(member?.id ?? member?.user_id ?? member?.agent_id ?? 0);
 }
 
@@ -252,7 +273,9 @@ const myTeamIds = computed(() => {
   return teams
     .filter(team => {
       const members = getTeamMembers(team);
-      return members.some(member => normalizeTeamMemberId(member) === userId);
+      return members.some(
+        member => normalizeTeamMemberId(member) === userId
+      );
     })
     .map(team => Number(team.id))
     .filter(Boolean);
@@ -269,6 +292,20 @@ function getConversationAssigneeId(conversation) {
 
 function getConversationTeamId(conversation) {
   return Number(conversation.team_id ?? conversation.meta?.team?.id ?? 0);
+}
+
+function isConversationInTeamScope(conversation) {
+  const conversationTeamId = getConversationTeamId(conversation);
+
+  if (isAdmin.value) {
+    return true;
+  }
+
+  if (props.teamId) {
+    return conversationTeamId === Number(props.teamId);
+  }
+
+  return allowedTeamIds.value.includes(conversationTeamId);
 }
 
 function isPendingTeamWithoutAgent(conversation) {
@@ -292,17 +329,11 @@ function matchesCurrentContext(conversation) {
     return false;
   }
 
-  if (props.teamId) {
-    const conversationTeamId = getConversationTeamId(conversation);
-    if (conversationTeamId !== Number(props.teamId)) {
-      return false;
-    }
-  }
-
   if (props.label) {
     const conversationLabels = Array.isArray(conversation.labels)
       ? conversation.labels
       : [];
+
     if (!conversationLabels.includes(props.label)) {
       return false;
     }
@@ -327,11 +358,15 @@ function belongsToTab(conversation, tabKey) {
   }
 
   if (tabKey === 'unassigned') {
-    return isPendingTeamWithoutAgent(conversation);
+    return (
+      isConversationInTeamScope(conversation) &&
+      isPendingTeamWithoutAgent(conversation)
+    );
   }
 
   if (tabKey === 'all') {
     return (
+      isConversationInTeamScope(conversation) &&
       conversation.status === 'resolved' &&
       assigneeId === currentUserId.value
     );
@@ -389,10 +424,7 @@ function syncConversationByPayload(payload) {
   let conversation = payload;
 
   if (!conversation?.id) {
-    const conversationId =
-      payload?.conversationId ??
-      payload?.id ??
-      null;
+    const conversationId = payload?.conversationId ?? payload?.id ?? null;
 
     if (conversationId) {
       conversation = getConversationById.value(conversationId);
@@ -400,6 +432,7 @@ function syncConversationByPayload(payload) {
   }
 
   if (!conversation?.id) return;
+
   syncConversationToTabs(conversation);
 }
 
@@ -461,7 +494,6 @@ const hasCurrentPageEndReached = useFunctionGetter(
   'conversationPage/getHasEndReached',
   currentPageFilterKey
 );
-
 const conversationCustomAttributes = useFunctionGetter(
   'attributes/getAttributesByModel',
   'conversation_attribute'
@@ -534,27 +566,35 @@ const pageTitle = computed(() => {
   if (hasAppliedFilters.value) {
     return t('CHAT_LIST.TAB_HEADING');
   }
+
   if (inbox.value.name) {
     return inbox.value.name;
   }
+
   if (activeTeam.value.name) {
     return activeTeam.value.name;
   }
+
   if (props.label) {
     return `#${props.label}`;
   }
+
   if (props.conversationType === 'mention') {
     return t('CHAT_LIST.MENTION_HEADING');
   }
+
   if (props.conversationType === 'participating') {
     return t('CONVERSATION_PARTICIPANTS.SIDEBAR_MENU_TITLE');
   }
+
   if (props.conversationType === 'unattended') {
     return t('CHAT_LIST.UNATTENDED_HEADING');
   }
+
   if (hasActiveFolders.value) {
     return activeFolder.value.name;
   }
+
   return t('CHAT_LIST.TAB_HEADING');
 });
 
@@ -668,9 +708,7 @@ function setFiltersFromUISettings() {
   const { status, order_by: orderBy } = filterBy;
 
   activeStatus.value = status || wootConstants.STATUS_TYPE.OPEN;
-  activeSortBy.value = Object.values(wootConstants.SORT_BY_TYPE).includes(
-    orderBy
-  )
+  activeSortBy.value = Object.values(wootConstants.SORT_BY_TYPE).includes(orderBy)
     ? orderBy
     : wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_DESC;
 }
@@ -688,7 +726,7 @@ function getTabFilters(tabKey, page = 1) {
       sortBy: activeSortBy.value,
       page,
       labels: props.label ? [props.label] : undefined,
-      teamId: props.teamId || undefined,
+      teamId: undefined,
       conversationType: props.conversationType || undefined,
     };
   }
@@ -728,6 +766,7 @@ function normalizeConversationRows(responseData) {
 
 function dedupeConversations(items) {
   const seen = new Set();
+
   return items.filter(item => {
     if (seen.has(item.id)) return false;
     seen.add(item.id);
@@ -744,16 +783,23 @@ async function fetchTab(tabKey, { append = false } = {}) {
   try {
     const nextPage = append ? tab.page + 1 : 1;
     const filters = getTabFilters(tabKey, nextPage);
+
     const responseData = await store.dispatch(
       'fetchConversationsByFilters',
       filters
     );
 
     const rawRows = normalizeConversationRows(responseData);
+    let scopedRows = rawRows;
+
+    if (tabKey === 'unassigned' || tabKey === 'all') {
+      scopedRows = rawRows.filter(isConversationInTeamScope);
+    }
+
     const rows =
       tabKey === 'unassigned'
-        ? rawRows.filter(isPendingTeamWithoutAgent)
-        : rawRows;
+        ? scopedRows.filter(isPendingTeamWithoutAgent)
+        : scopedRows;
 
     mirrorRowsToStore(rows);
 
@@ -765,7 +811,7 @@ async function fetchTab(tabKey, { append = false } = {}) {
       tab.page = 1;
     }
 
-    tab.hasEndReached = rawRows.length < TAB_PAGE_SIZE;
+    tab.hasEndReached = scopedRows.length < TAB_PAGE_SIZE;
     tab.initialized = true;
   } catch (error) {
     // Ignore local tab fetch error
@@ -775,7 +821,11 @@ async function fetchTab(tabKey, { append = false } = {}) {
 }
 
 async function prefetchAllTabs() {
-  await Promise.all([fetchTab('me'), fetchTab('unassigned'), fetchTab('all')]);
+  await Promise.all([
+    fetchTab('me'),
+    fetchTab('unassigned'),
+    fetchTab('all'),
+  ]);
 }
 
 function fetchFilteredConversations(payload) {
@@ -790,6 +840,7 @@ function fetchFilteredConversations(payload) {
     .then(emitConversationLoaded);
 
   showAdvancedFilters.value = false;
+
   return request;
 }
 
@@ -821,11 +872,13 @@ function closeAdvanceFiltersModal() {
 
 function onUpdateSavedFilter(payload, folderName) {
   const transformedPayload = useSnakeCase(payload);
+
   const payloadData = {
     ...unref(activeFolder),
     name: unref(folderName),
     query: filterQueryGenerator(transformedPayload),
   };
+
   store.dispatch('customViews/update', payloadData);
   closeAdvanceFiltersModal();
 }
@@ -927,9 +980,11 @@ function onToggleAdvanceFiltersModal() {
   if (!hasAppliedFilters.value && !hasActiveFolders.value) {
     initializeExistingFilterToModal();
   }
+
   if (hasActiveFolders.value) {
     initializeFolderToFilterModal(activeFolder.value);
   }
+
   if (hasAppliedFilters.value) {
     initalizeAppliedFiltersToModal();
   }
@@ -1064,6 +1119,7 @@ function redirectToConversationList() {
   } = route;
 
   let conversationType = '';
+
   if (isOnMentionsView({ route: { name } })) {
     conversationType = 'mention';
   } else if (isOnUnattendedView({ route: { name } })) {
@@ -1088,11 +1144,15 @@ async function assignPriority(priority, conversationId = null) {
     conversationId,
   });
 
-  store.dispatch('assignPriority', { conversationId, priority }).then(() => {
+  store.dispatch('assignPriority', {
+    conversationId,
+    priority,
+  }).then(() => {
     useTrack(CONVERSATION_EVENTS.CHANGE_PRIORITY, {
       newValue: priority,
       from: 'Context menu',
     });
+
     useAlert(
       t('CONVERSATION.PRIORITY.CHANGE_PRIORITY.SUCCESSFUL', {
         priority,
@@ -1129,6 +1189,7 @@ async function onAssignTeam(team, conversationId = null) {
       conversationId,
       teamId: team.id,
     });
+
     useAlert(
       t('CONVERSATION.CARD_CONTEXT_MENU.API.TEAM_ASSIGNMENT.SUCCESFUL', {
         team: team.name,
@@ -1136,7 +1197,9 @@ async function onAssignTeam(team, conversationId = null) {
       })
     );
   } catch {
-    useAlert(t('CONVERSATION.CARD_CONTEXT_MENU.API.TEAM_ASSIGNMENT.FAILED'));
+    useAlert(
+      t('CONVERSATION.CARD_CONTEXT_MENU.API.TEAM_ASSIGNMENT.FAILED')
+    );
   }
 }
 
@@ -1169,15 +1232,14 @@ function handleResolveConversation(conversationId, status, snoozedUntil) {
 
   const conversation = getConversationById.value(conversationId);
   const currentCustomAttributes = conversation?.custom_attributes || {};
-  const { hasMissing, missing } = checkMissingAttributes(
-    currentCustomAttributes
-  );
+  const { hasMissing, missing } = checkMissingAttributes(currentCustomAttributes);
 
   if (hasMissing) {
     const conversationContext = {
       id: conversationId,
       snoozedUntil,
     };
+
     resolveAttributesModalRef.value?.open(
       missing,
       currentCustomAttributes,
@@ -1191,9 +1253,11 @@ function handleResolveConversation(conversationId, status, snoozedUntil) {
 function handleResolveWithAttributes({ attributes, context }) {
   if (context) {
     const existingConversation = getConversationById.value(context.id);
-    const currentCustomAttributes =
-      existingConversation?.custom_attributes || {};
-    const mergedAttributes = { ...currentCustomAttributes, ...attributes };
+    const currentCustomAttributes = existingConversation?.custom_attributes || {};
+    const mergedAttributes = {
+      ...currentCustomAttributes,
+      ...attributes,
+    };
 
     toggleConversationStatus(
       context.id,
@@ -1236,7 +1300,6 @@ useEmitter('fetch_conversation_stats', () => {
   if (hasAppliedFiltersOrActiveFolders.value) return;
   store.dispatch('conversationStats/get', conversationFilters.value);
 });
-
 
 onMounted(async () => {
   try {
