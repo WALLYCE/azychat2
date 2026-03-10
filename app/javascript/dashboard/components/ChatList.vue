@@ -305,13 +305,11 @@ function isConversationInTeamScope(conversation) {
   return allowedTeamIds.value.includes(conversationTeamId);
 }
 
-function isPendingTeamWithoutAgent(conversation) {
-  const assigneeId = getConversationAssigneeId(conversation);
+function isPendingFromMyTeams(conversation) {
   const teamId = getConversationTeamId(conversation);
 
   return (
     conversation.status === 'pending' &&
-    !assigneeId &&
     allowedTeamIds.value.includes(teamId)
   );
 }
@@ -355,7 +353,7 @@ function belongsToTab(conversation, tabKey) {
   }
 
   if (tabKey === 'unassigned') {
-    return isPendingTeamWithoutAgent(conversation);
+    return isPendingFromMyTeams(conversation);
   }
 
   if (tabKey === 'all') {
@@ -718,7 +716,6 @@ function getTabFilters(tabKey, page = 1, teamIdOverride = undefined) {
   if (tabKey === 'unassigned') {
     return {
       inboxId: props.conversationInbox ? props.conversationInbox : undefined,
-      assigneeType: 'unassigned',
       status: 'pending',
       sortBy: activeSortBy.value,
       page,
@@ -783,7 +780,7 @@ async function fetchPendingForAllowedTeams(page) {
 
   const rows = dedupeConversations(
     mergedRows.filter(conversation => {
-      return matchesCurrentContext(conversation) && isPendingTeamWithoutAgent(conversation);
+      return matchesCurrentContext(conversation) && isPendingFromMyTeams(conversation);
     })
   );
 
@@ -838,7 +835,7 @@ async function fetchTab(tabKey, { append = false } = {}) {
     const rows =
       tabKey === 'unassigned'
         ? scopedRows.filter(conversation => {
-            return matchesCurrentContext(conversation) && isPendingTeamWithoutAgent(conversation);
+            return matchesCurrentContext(conversation) && isPendingFromMyTeams(conversation);
           })
         : rawRows.filter(matchesCurrentContext);
 
