@@ -8,7 +8,9 @@ import {
   computed,
   watch,
   onMounted,
+  onBeforeUnmount,
   defineEmits,
+  reactive,
 } from 'vue';
 import { useStore } from 'vuex';
 import { useRoute, useRouter } from 'vue-router';
@@ -66,6 +68,8 @@ import { matchesFilters } from '../store/modules/conversations/helpers/filterHel
 import { CONVERSATION_EVENTS } from '../helper/AnalyticsHelper/events';
 import { ASSIGNEE_TYPE_TAB_PERMISSIONS } from 'dashboard/constants/permissions.js';
 
+const TAB_PAGE_SIZE = 25;
+
 const props = defineProps({
   conversationInbox: { type: [String, Number], default: 0 },
   teamId: { type: [String, Number], default: 0 },
@@ -86,6 +90,7 @@ const store = useStore();
 const resolveAttributesModalRef = ref(null);
 const conversationListRef = ref(null);
 const virtualListRef = ref(null);
+let unsubscribeSocketBridge = null;
 
 provide('contextMenuElementTarget', virtualListRef);
 
@@ -105,6 +110,30 @@ const advancedFilterTypes = ref(
     attributeName: t(`FILTER.ATTRIBUTES.${filter.attributeI18nKey}`),
   }))
 );
+
+const tabState = reactive({
+  me: {
+    items: [],
+    page: 0,
+    loading: false,
+    hasEndReached: false,
+    initialized: false,
+  },
+  unassigned: {
+    items: [],
+    page: 0,
+    loading: false,
+    hasEndReached: false,
+    initialized: false,
+  },
+  all: {
+    items: [],
+    page: 0,
+    loading: false,
+    hasEndReached: false,
+    initialized: false,
+  },
+});
 
 const currentUser = useMapGetter('getCurrentUser');
 const chatLists = useMapGetter('getFilteredConversations');
@@ -194,6 +223,8 @@ const isAdmin = computed(() => {
   return currentUser.value?.role === 'administrator';
 });
 
+const currentUserId = computed(() => Number(currentUser.value?.id || 0));
+
 function normalizeTeamMemberId(member) {
   if (typeof member === 'number' || typeof member === 'string') {
     return Number(member);
@@ -251,40 +282,126 @@ function isPendingTeamWithoutAgent(conversation) {
   );
 }
 
-const agentTabCounts = computed(() => {
-  const baseFilters = {
-    inboxId: props.conversationInbox || undefined,
-    sortBy: activeSortBy.value,
-    labels: props.label ? [props.label] : undefined,
-    teamId: props.teamId || undefined,
-    conversationType: props.conversationType || undefined,
-    page: 1,
-  };
+function matchesCurrentContext(conversation) {
+  if (!conversation) return false;
 
-  const openMine = mineChatsList.value({
-    ...baseFilters,
-    assigneeType: 'me',
-    status: 'open',
-  }).length;
+  if (
+    props.conversationInbox &&
+    Number(conversation.inbox_id) !== Number(props.conversationInbox)
+  ) {
+    return false;
+  }
 
-  const pendingTeam = unAssignedChatsList.value({
-    ...baseFilters,
-    assigneeType: 'unassigned',
-    status: 'pending',
-  }).filter(isPendingTeamWithoutAgent).length;
+  if (props.teamId) {
+    const conversationTeamId = getConversationTeamId(conversation);
+    if (conversationTeamId !== Number(props.teamId)) {
+      return false;
+    }
+  }
 
-  const resolvedMine = mineChatsList.value({
-    ...baseFilters,
-    assigneeType: 'me',
-    status: 'resolved',
-  }).length;
+  if (props.label) {
+    const conversationLabels = Array.isArray(conversation.labels)
+      ? conversation.labels
+      : [];
+    if (!conversationLabels.includes(props.label)) {
+      return false;
+    }
+  }
 
-  return {
-    openMine,
-    pendingTeam,
-    resolvedMine,
-  };
-});
+  if (props.conversationType) {
+    if (conversation.conversation_type !== props.conversationType) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function belongsToTab(conversation, tabKey) {
+  if (!matchesCurrentContext(conversation)) return false;
+
+  const assigneeId = getConversationAssigneeId(conversation);
+
+  if (tabKey === 'me') {
+    return conversation.status === 'open' && assigneeId === currentUserId.value;
+  }
+
+  if (tabKey === 'unassigned') {
+    return isPendingTeamWithoutAgent(conversation);
+  }
+
+  if (tabKey === 'all') {
+    return (
+      conversation.status === 'resolved' &&
+      assigneeId === currentUserId.value
+    );
+  }
+
+  return false;
+}
+
+function sortConversationsByLastActivity(items) {
+  return [...items].sort((a, b) => {
+    const aDate = new Date(a.last_activity_at || a.timestamp || a.created_at || 0);
+    const bDate = new Date(b.last_activity_at || b.timestamp || b.created_at || 0);
+    return bDate - aDate;
+  });
+}
+
+function removeConversationFromAllTabs(conversationId) {
+  ['me', 'unassigned', 'all'].forEach(tabKey => {
+    tabState[tabKey].items = tabState[tabKey].items.filter(
+      item => item.id !== conversationId
+    );
+  });
+}
+
+function upsertConversationInTab(tabKey, conversation) {
+  const currentItems = tabState[tabKey].items.filter(
+    item => item.id !== conversation.id
+  );
+
+  tabState[tabKey].items = sortConversationsByLastActivity([
+    conversation,
+    ...currentItems,
+  ]);
+}
+
+function syncConversationToTabs(conversation) {
+  if (!conversation?.id) return;
+
+  removeConversationFromAllTabs(conversation.id);
+
+  if (belongsToTab(conversation, 'me')) {
+    upsertConversationInTab('me', conversation);
+  }
+
+  if (belongsToTab(conversation, 'unassigned')) {
+    upsertConversationInTab('unassigned', conversation);
+  }
+
+  if (belongsToTab(conversation, 'all')) {
+    upsertConversationInTab('all', conversation);
+  }
+}
+
+function syncConversationByPayload(payload) {
+  let conversation = payload;
+
+  if (!conversation?.id) {
+    const conversationId =
+      payload?.conversationId ??
+      payload?.id ??
+      null;
+
+    if (conversationId) {
+      conversation = getConversationById.value(conversationId);
+    }
+  }
+
+  if (!conversation?.id) return;
+  syncConversationToTabs(conversation);
+}
 
 const assigneeTabItems = computed(() => {
   if (isAdmin.value) {
@@ -303,29 +420,26 @@ const assigneeTabItems = computed(() => {
     {
       key: 'me',
       name: 'Abertas',
-      count: agentTabCounts.value.openMine,
+      count: tabState.me.items.length,
     },
     {
       key: 'unassigned',
       name: 'Pendentes',
-      count: agentTabCounts.value.pendingTeam,
+      count: tabState.unassigned.items.length,
     },
     {
       key: 'all',
       name: 'Finalizadas',
-      count: agentTabCounts.value.resolvedMine,
+      count: tabState.all.items.length,
     },
   ];
 });
 
 const showAssigneeInConversationCard = computed(() => {
-  if (hasAppliedFiltersOrActiveFolders.value) return true;
-
-  if (isAdmin.value) {
-    return activeAssigneeTab.value === wootConstants.ASSIGNEE_TYPE.ALL;
-  }
-
-  return false;
+  return (
+    hasAppliedFiltersOrActiveFolders.value ||
+    activeAssigneeTab.value === wootConstants.ASSIGNEE_TYPE.ALL
+  );
 });
 
 const currentPageFilterKey = computed(() => {
@@ -361,7 +475,7 @@ const activeAssigneeTabCount = computed(() => {
 });
 
 const conversationListPagination = computed(() => {
-  const conversationsPerPage = 25;
+  const conversationsPerPage = TAB_PAGE_SIZE;
   const hasChatsOnView =
     chatsOnView.value &&
     Array.isArray(chatsOnView.value) &&
@@ -461,29 +575,21 @@ const headerStatusLabel = computed(() => {
 });
 
 const conversationList = computed(() => {
+  if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
+    return tabState[activeAssigneeTab.value]?.items || [];
+  }
+
   let localConversationList = [];
 
   if (!hasAppliedFiltersOrActiveFolders.value) {
     const filters = conversationFilters.value;
 
-    if (!isAdmin.value) {
-      if (activeAssigneeTab.value === 'me') {
-        localConversationList = [...mineChatsList.value(filters)];
-      } else if (activeAssigneeTab.value === 'unassigned') {
-        localConversationList = [...unAssignedChatsList.value(filters)].filter(
-          isPendingTeamWithoutAgent
-        );
-      } else if (activeAssigneeTab.value === 'all') {
-        localConversationList = [...mineChatsList.value(filters)];
-      }
+    if (activeAssigneeTab.value === 'me') {
+      localConversationList = [...mineChatsList.value(filters)];
+    } else if (activeAssigneeTab.value === 'unassigned') {
+      localConversationList = [...unAssignedChatsList.value(filters)];
     } else {
-      if (activeAssigneeTab.value === 'me') {
-        localConversationList = [...mineChatsList.value(filters)];
-      } else if (activeAssigneeTab.value === 'unassigned') {
-        localConversationList = [...unAssignedChatsList.value(filters)];
-      } else {
-        localConversationList = [...allChatList.value(filters)];
-      }
+      localConversationList = [...allChatList.value(filters)];
     }
   } else {
     localConversationList = [...chatLists.value];
@@ -499,7 +605,24 @@ const conversationList = computed(() => {
   return localConversationList;
 });
 
+const isCurrentListLoading = computed(() => {
+  if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
+    return tabState[activeAssigneeTab.value]?.loading;
+  }
+
+  return chatListLoading.value && !conversationList.value.length;
+});
+
 const showEndOfListMessage = computed(() => {
+  if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
+    const currentTab = tabState[activeAssigneeTab.value];
+    return (
+      currentTab.items.length &&
+      currentTab.hasEndReached &&
+      !currentTab.loading
+    );
+  }
+
   return (
     conversationList.value.length &&
     hasCurrentPageEndReached.value &&
@@ -521,6 +644,25 @@ const uniqueInboxes = computed(() => {
 });
 
 // ---------------------- Methods -----------------------
+function resetTabState(tabKey = null) {
+  const resetOne = key => {
+    tabState[key].items = [];
+    tabState[key].page = 0;
+    tabState[key].loading = false;
+    tabState[key].hasEndReached = false;
+    tabState[key].initialized = false;
+  };
+
+  if (tabKey) {
+    resetOne(tabKey);
+    return;
+  }
+
+  resetOne('me');
+  resetOne('unassigned');
+  resetOne('all');
+}
+
 function setFiltersFromUISettings() {
   const { conversations_filter_by: filterBy = {} } = uiSettings.value;
   const { status, order_by: orderBy } = filterBy;
@@ -535,6 +677,103 @@ function setFiltersFromUISettings() {
 
 function emitConversationLoaded() {
   emit('conversationLoad');
+}
+
+function getTabFilters(tabKey, page = 1) {
+  if (tabKey === 'me') {
+    return {
+      inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+      assigneeType: 'me',
+      status: 'open',
+      sortBy: activeSortBy.value,
+      page,
+      labels: props.label ? [props.label] : undefined,
+      teamId: props.teamId || undefined,
+      conversationType: props.conversationType || undefined,
+    };
+  }
+
+  if (tabKey === 'unassigned') {
+    return {
+      inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+      assigneeType: 'unassigned',
+      status: 'pending',
+      sortBy: activeSortBy.value,
+      page,
+      labels: props.label ? [props.label] : undefined,
+      teamId: props.teamId || undefined,
+      conversationType: props.conversationType || undefined,
+    };
+  }
+
+  return {
+    inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+    assigneeType: 'me',
+    status: 'resolved',
+    sortBy: activeSortBy.value,
+    page,
+    labels: props.label ? [props.label] : undefined,
+    teamId: props.teamId || undefined,
+    conversationType: props.conversationType || undefined,
+  };
+}
+
+function normalizeConversationRows(responseData) {
+  if (Array.isArray(responseData)) return responseData;
+  if (Array.isArray(responseData?.payload)) return responseData.payload;
+  if (Array.isArray(responseData?.data)) return responseData.data;
+  if (Array.isArray(responseData?.conversations)) return responseData.conversations;
+  return [];
+}
+
+function dedupeConversations(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+async function fetchTab(tabKey, { append = false } = {}) {
+  const tab = tabState[tabKey];
+  if (tab.loading) return;
+
+  tab.loading = true;
+
+  try {
+    const nextPage = append ? tab.page + 1 : 1;
+    const filters = getTabFilters(tabKey, nextPage);
+    const responseData = await store.dispatch(
+      'fetchConversationsByFilters',
+      filters
+    );
+
+    const rawRows = normalizeConversationRows(responseData);
+    const rows =
+      tabKey === 'unassigned'
+        ? rawRows.filter(isPendingTeamWithoutAgent)
+        : rawRows;
+
+    if (append) {
+      tab.items = dedupeConversations([...tab.items, ...rows]);
+      tab.page = nextPage;
+    } else {
+      tab.items = rows;
+      tab.page = 1;
+    }
+
+    tab.hasEndReached = rawRows.length < TAB_PAGE_SIZE;
+    tab.initialized = true;
+  } catch (error) {
+    // Ignore local tab fetch error
+  } finally {
+    tab.loading = false;
+  }
+}
+
+async function prefetchAllTabs() {
+  await Promise.all([fetchTab('me'), fetchTab('unassigned'), fetchTab('all')]);
 }
 
 function fetchFilteredConversations(payload) {
@@ -701,61 +940,45 @@ function fetchConversations(filters = conversationFilters.value) {
   return store.dispatch('fetchAllConversations').then(emitConversationLoaded);
 }
 
-function fetchTabDataOnly(filters = conversationFilters.value) {
-  store.dispatch('conversationPage/reset');
-  store.dispatch('updateChatListFilters', filters);
-  return store.dispatch('fetchAllConversations').then(emitConversationLoaded);
-}
-
-function resetAndFetchData() {
+async function resetAndFetchData() {
   appliedFilter.value = [];
   resetBulkActions();
+
+  if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
+    resetTabState();
+    await prefetchAllTabs();
+    return;
+  }
+
   store.dispatch('conversationPage/reset');
   store.dispatch('emptyAllConversations');
   store.dispatch('clearConversationFilters');
 
   if (hasActiveFolders.value) {
     const payload = activeFolder.value.query;
-    return fetchSavedFilteredConversations(payload);
+    await fetchSavedFilteredConversations(payload);
+    return;
   }
 
   if (props.foldersId) {
-    return Promise.resolve();
+    return;
   }
 
-  return fetchConversations();
+  await fetchConversations();
 }
 
-function getResolvedPrefetchFilters() {
-  return {
-    inboxId: props.conversationInbox ? props.conversationInbox : undefined,
-    assigneeType: 'me',
-    status: 'resolved',
-    sortBy: activeSortBy.value,
-    page: 1,
-    labels: props.label ? [props.label] : undefined,
-    teamId: props.teamId || undefined,
-    conversationType: props.conversationType || undefined,
-  };
-}
+async function loadMoreConversations() {
+  if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
+    const currentTab = tabState[activeAssigneeTab.value];
 
-async function prefetchResolvedConversations() {
-  if (isAdmin.value) return;
-  if (hasAppliedFiltersOrActiveFolders.value) return;
+    if (currentTab.loading || currentTab.hasEndReached) {
+      return;
+    }
 
-  const currentFiltersSnapshot = { ...conversationFilters.value };
-  const resolvedFilters = getResolvedPrefetchFilters();
-
-  try {
-    await fetchConversations(resolvedFilters);
-  } catch {
-    // ignora falha do pré-carregamento
-  } finally {
-    store.dispatch('updateChatListFilters', currentFiltersSnapshot);
+    await fetchTab(activeAssigneeTab.value, { append: true });
+    return;
   }
-}
 
-function loadMoreConversations() {
   if (hasCurrentPageEndReached.value || chatListLoading.value) {
     return;
   }
@@ -775,34 +998,6 @@ const intersectionObserverOptions = computed(() => ({
   rootMargin: '100px 0px 100px 0px',
 }));
 
-function getTabFilters(selectedTab) {
-  const mappedAssigneeType =
-    !isAdmin.value && selectedTab === 'all' ? 'me' : selectedTab;
-
-  let mappedStatus = activeStatus.value;
-
-  if (!isAdmin.value) {
-    if (selectedTab === 'me') {
-      mappedStatus = 'open';
-    } else if (selectedTab === 'unassigned') {
-      mappedStatus = 'pending';
-    } else if (selectedTab === 'all') {
-      mappedStatus = 'resolved';
-    }
-  }
-
-  return {
-    inboxId: props.conversationInbox ? props.conversationInbox : undefined,
-    assigneeType: mappedAssigneeType,
-    status: mappedStatus,
-    sortBy: activeSortBy.value,
-    page: 1,
-    labels: props.label ? [props.label] : undefined,
-    teamId: props.teamId || undefined,
-    conversationType: props.conversationType || undefined,
-  };
-}
-
 function updateAssigneeTab(selectedTab) {
   if (activeAssigneeTab.value === selectedTab) return;
 
@@ -820,8 +1015,13 @@ function updateAssigneeTab(selectedTab) {
     }
   }
 
-  const nextFilters = getTabFilters(selectedTab);
-  fetchTabDataOnly(nextFilters);
+  if (
+    !hasAppliedFiltersOrActiveFolders.value &&
+    !isAdmin.value &&
+    !tabState[selectedTab].initialized
+  ) {
+    fetchTab(selectedTab);
+  }
 }
 
 function onBasicFilterChange(value, type) {
@@ -1031,15 +1231,47 @@ onMounted(async () => {
   }
 
   setFiltersFromUISettings();
-  store.dispatch('setChatListFilters', conversationFilters.value);
   store.dispatch('setChatStatusFilter', activeStatus.value);
   store.dispatch('setChatSortFilter', activeSortBy.value);
 
-  await resetAndFetchData();
-  await prefetchResolvedConversations();
+  if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
+    await prefetchAllTabs();
+  } else {
+    store.dispatch('setChatListFilters', conversationFilters.value);
+    await store.dispatch('fetchAllConversations');
+    emitConversationLoaded();
+  }
 
   if (hasActiveFolders.value) {
     store.dispatch('campaigns/get');
+  }
+
+  unsubscribeSocketBridge = store.subscribeAction({
+    after: action => {
+      const type = action.type;
+
+      if (
+        type === 'addConversation' ||
+        type === 'updateConversation' ||
+        type === 'updateConversationLastActivity' ||
+        type === 'setCurrentChatAssignee' ||
+        type === 'setCurrentChatTeam' ||
+        type === 'updateConversationContact' ||
+        type === 'toggleStatus'
+      ) {
+        syncConversationByPayload(action.payload);
+      }
+
+      if (type === 'deleteConversation') {
+        removeConversationFromAllTabs(action.payload);
+      }
+    },
+  });
+});
+
+onBeforeUnmount(() => {
+  if (unsubscribeSocketBridge) {
+    unsubscribeSocketBridge();
   }
 });
 
@@ -1101,9 +1333,13 @@ watch(activeFolder, (newVal, oldVal) => {
   resetAndFetchData();
 });
 
-watch(chatLists, () => {
-  chatsOnView.value = conversationList.value;
-});
+watch(
+  conversationList,
+  value => {
+    chatsOnView.value = value;
+  },
+  { immediate: true }
+);
 
 watch(conversationFilters, (newVal, oldVal) => {
   if (newVal !== oldVal) {
@@ -1129,7 +1365,7 @@ watch(conversationFilters, (newVal, oldVal) => {
       :active-status="activeStatus"
       :is-on-expanded-layout="isOnExpandedLayout"
       :conversation-stats="conversationStats"
-      :is-list-loading="chatListLoading && !conversationList.length"
+      :is-list-loading="isCurrentListLoading"
       :status-chip-label="headerStatusLabel"
       :hide-basic-status-filter="isRestrictedAgentView"
       @add-folders="onClickOpenAddFoldersModal"
@@ -1169,7 +1405,7 @@ watch(conversationFilters, (newVal, oldVal) => {
     />
 
     <p
-      v-if="!chatListLoading && !conversationList.length"
+      v-if="!isCurrentListLoading && !conversationList.length"
       class="flex overflow-auto justify-center items-center p-4"
     >
       {{ $t('CHAT_LIST.LIST.404') }}
@@ -1213,7 +1449,7 @@ watch(conversationFilters, (newVal, oldVal) => {
         />
       </Virtualizer>
 
-      <div v-if="chatListLoading" class="flex justify-center my-4">
+      <div v-if="isCurrentListLoading" class="flex justify-center my-4">
         <Spinner class="text-n-brand" />
       </div>
 

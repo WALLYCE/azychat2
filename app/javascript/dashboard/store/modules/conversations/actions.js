@@ -41,6 +41,14 @@ const actions = {
     }
   },
 
+  fetchConversationsByFilters: async (_, params) => {
+      const {
+        data: { data },
+      } = await ConversationApi.get(params);
+
+      return data;
+    },
+
   fetchAllConversations: async ({ commit, state, dispatch }) => {
     commit(types.SET_LIST_LOADING_STATUS);
     try {
