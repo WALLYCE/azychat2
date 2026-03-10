@@ -701,6 +701,12 @@ function fetchConversations(filters = conversationFilters.value) {
   return store.dispatch('fetchAllConversations').then(emitConversationLoaded);
 }
 
+function fetchTabDataOnly(filters = conversationFilters.value) {
+  store.dispatch('conversationPage/reset');
+  store.dispatch('updateChatListFilters', filters);
+  return store.dispatch('fetchAllConversations').then(emitConversationLoaded);
+}
+
 function resetAndFetchData() {
   appliedFilter.value = [];
   resetBulkActions();
@@ -769,6 +775,34 @@ const intersectionObserverOptions = computed(() => ({
   rootMargin: '100px 0px 100px 0px',
 }));
 
+function getTabFilters(selectedTab) {
+  const mappedAssigneeType =
+    !isAdmin.value && selectedTab === 'all' ? 'me' : selectedTab;
+
+  let mappedStatus = activeStatus.value;
+
+  if (!isAdmin.value) {
+    if (selectedTab === 'me') {
+      mappedStatus = 'open';
+    } else if (selectedTab === 'unassigned') {
+      mappedStatus = 'pending';
+    } else if (selectedTab === 'all') {
+      mappedStatus = 'resolved';
+    }
+  }
+
+  return {
+    inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+    assigneeType: mappedAssigneeType,
+    status: mappedStatus,
+    sortBy: activeSortBy.value,
+    page: 1,
+    labels: props.label ? [props.label] : undefined,
+    teamId: props.teamId || undefined,
+    conversationType: props.conversationType || undefined,
+  };
+}
+
 function updateAssigneeTab(selectedTab) {
   if (activeAssigneeTab.value === selectedTab) return;
 
@@ -786,7 +820,8 @@ function updateAssigneeTab(selectedTab) {
     }
   }
 
-  resetAndFetchData();
+  const nextFilters = getTabFilters(selectedTab);
+  fetchTabDataOnly(nextFilters);
 }
 
 function onBasicFilterChange(value, type) {
