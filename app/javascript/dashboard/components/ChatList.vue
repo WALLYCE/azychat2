@@ -9,8 +9,8 @@ import {
   watch,
   onMounted,
   onBeforeUnmount,
-  defineEmits,
   reactive,
+  defineEmits,
 } from 'vue';
 import { useStore } from 'vuex';
 import { useRoute, useRouter } from 'vue-router';
@@ -204,7 +204,6 @@ const {
 
 const { checkMissingAttributes } = useConversationRequiredAttributes();
 
-// computed
 const hasAppliedFilters = computed(() => {
   return appliedFilters.value.length !== 0;
 });
@@ -273,9 +272,7 @@ const myTeamIds = computed(() => {
   return teams
     .filter(team => {
       const members = getTeamMembers(team);
-      return members.some(
-        member => normalizeTeamMemberId(member) === userId
-      );
+      return members.some(member => normalizeTeamMemberId(member) === userId);
     })
     .map(team => Number(team.id))
     .filter(Boolean);
@@ -358,18 +355,11 @@ function belongsToTab(conversation, tabKey) {
   }
 
   if (tabKey === 'unassigned') {
-    return (
-      isConversationInTeamScope(conversation) &&
-      isPendingTeamWithoutAgent(conversation)
-    );
+    return isPendingTeamWithoutAgent(conversation);
   }
 
   if (tabKey === 'all') {
-    return (
-      isConversationInTeamScope(conversation) &&
-      conversation.status === 'resolved' &&
-      assigneeId === currentUserId.value
-    );
+    return conversation.status === 'resolved' && assigneeId === currentUserId.value;
   }
 
   return false;
@@ -425,7 +415,6 @@ function syncConversationByPayload(payload) {
 
   if (!conversation?.id) {
     const conversationId = payload?.conversationId ?? payload?.id ?? null;
-
     if (conversationId) {
       conversation = getConversationById.value(conversationId);
     }
@@ -656,11 +645,7 @@ const isCurrentListLoading = computed(() => {
 const showEndOfListMessage = computed(() => {
   if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
     const currentTab = tabState[activeAssigneeTab.value];
-    return (
-      currentTab.items.length &&
-      currentTab.hasEndReached &&
-      !currentTab.loading
-    );
+    return currentTab.items.length && currentTab.hasEndReached && !currentTab.loading;
   }
 
   return (
@@ -683,7 +668,6 @@ const uniqueInboxes = computed(() => {
   return [...new Set(selectedInboxes.value)];
 });
 
-// ---------------------- Methods -----------------------
 function resetTabState(tabKey = null) {
   const resetOne = key => {
     tabState[key].items = [];
@@ -717,7 +701,7 @@ function emitConversationLoaded() {
   emit('conversationLoad');
 }
 
-function getTabFilters(tabKey, page = 1) {
+function getTabFilters(tabKey, page = 1, teamIdOverride = undefined) {
   if (tabKey === 'me') {
     return {
       inboxId: props.conversationInbox ? props.conversationInbox : undefined,
@@ -739,7 +723,7 @@ function getTabFilters(tabKey, page = 1) {
       sortBy: activeSortBy.value,
       page,
       labels: props.label ? [props.label] : undefined,
-      teamId: props.teamId || undefined,
+      teamId: teamIdOverride ?? (props.teamId || undefined),
       conversationType: props.conversationType || undefined,
     };
   }
@@ -774,6 +758,46 @@ function dedupeConversations(items) {
   });
 }
 
+async function fetchPendingForAllowedTeams(page) {
+  const teamIds = props.teamId ? [Number(props.teamId)] : allowedTeamIds.value;
+
+  if (!teamIds.length) {
+    return {
+      rows: [],
+      hasEndReached: true,
+    };
+  }
+
+  const responses = await Promise.all(
+    teamIds.map(teamId =>
+      store.dispatch(
+        'fetchConversationsByFilters',
+        getTabFilters('unassigned', page, teamId)
+      )
+    )
+  );
+
+  const mergedRows = responses.flatMap(response =>
+    normalizeConversationRows(response)
+  );
+
+  const rows = dedupeConversations(
+    mergedRows.filter(conversation => {
+      return matchesCurrentContext(conversation) && isPendingTeamWithoutAgent(conversation);
+    })
+  );
+
+  const hasEndReached = responses.every(response => {
+    const normalized = normalizeConversationRows(response);
+    return normalized.length < TAB_PAGE_SIZE;
+  });
+
+  return {
+    rows: sortConversationsByLastActivity(rows),
+    hasEndReached,
+  };
+}
+
 async function fetchTab(tabKey, { append = false } = {}) {
   const tab = tabState[tabKey];
   if (tab.loading) return;
@@ -782,24 +806,41 @@ async function fetchTab(tabKey, { append = false } = {}) {
 
   try {
     const nextPage = append ? tab.page + 1 : 1;
+
+    if (tabKey === 'unassigned' && !isAdmin.value && !props.teamId) {
+      const { rows, hasEndReached } = await fetchPendingForAllowedTeams(nextPage);
+
+      mirrorRowsToStore(rows);
+
+      if (append) {
+        tab.items = dedupeConversations([...tab.items, ...rows]);
+        tab.page = nextPage;
+      } else {
+        tab.items = rows;
+        tab.page = 1;
+      }
+
+      tab.hasEndReached = hasEndReached;
+      tab.initialized = true;
+      return;
+    }
+
     const filters = getTabFilters(tabKey, nextPage);
-
-    const responseData = await store.dispatch(
-      'fetchConversationsByFilters',
-      filters
-    );
-
+    const responseData = await store.dispatch('fetchConversationsByFilters', filters);
     const rawRows = normalizeConversationRows(responseData);
+
     let scopedRows = rawRows;
 
-    if (tabKey === 'unassigned' || tabKey === 'all') {
+    if (tabKey === 'unassigned') {
       scopedRows = rawRows.filter(isConversationInTeamScope);
     }
 
     const rows =
       tabKey === 'unassigned'
-        ? scopedRows.filter(isPendingTeamWithoutAgent)
-        : scopedRows;
+        ? scopedRows.filter(conversation => {
+            return matchesCurrentContext(conversation) && isPendingTeamWithoutAgent(conversation);
+          })
+        : rawRows.filter(matchesCurrentContext);
 
     mirrorRowsToStore(rows);
 
@@ -811,7 +852,7 @@ async function fetchTab(tabKey, { append = false } = {}) {
       tab.page = 1;
     }
 
-    tab.hasEndReached = scopedRows.length < TAB_PAGE_SIZE;
+    tab.hasEndReached = rawRows.length < TAB_PAGE_SIZE;
     tab.initialized = true;
   } catch (error) {
     // Ignore local tab fetch error
@@ -1197,9 +1238,7 @@ async function onAssignTeam(team, conversationId = null) {
       })
     );
   } catch {
-    useAlert(
-      t('CONVERSATION.CARD_CONTEXT_MENU.API.TEAM_ASSIGNMENT.FAILED')
-    );
+    useAlert(t('CONVERSATION.CARD_CONTEXT_MENU.API.TEAM_ASSIGNMENT.FAILED'));
   }
 }
 
