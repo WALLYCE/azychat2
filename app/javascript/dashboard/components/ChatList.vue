@@ -184,7 +184,7 @@ const hasAppliedFiltersOrActiveFolders = computed(() => {
 });
 
 const currentUserDetails = computed(() => {
-  const { id, name } = currentUser.value;
+  const { id, name } = currentUser.value || {};
   return { id, name };
 });
 
@@ -192,11 +192,78 @@ const userPermissions = computed(() => {
   return getUserPermissions(currentUser.value, currentAccountId.value);
 });
 
-const assigneeTabItems = computed(() => {
-  const isAdmin = currentUser.value && currentUser.value.role === 'administrator';
+const isAdmin = computed(() => {
+  return currentUser.value?.role === 'administrator';
+});
 
-  if (isAdmin) {
-    // Mantém o painel original para os Administradores
+const myTeamIds = computed(() => {
+  // Ajuste aqui se no seu payload o caminho real das equipes for outro
+  const teams = currentUser.value?.teams || [];
+  return teams.map(team => Number(team.id)).filter(Boolean);
+});
+
+const allowedTeamIds = computed(() => {
+  // Se estiver dentro de uma rota de time específico, respeita ela
+  if (props.teamId) return [Number(props.teamId)];
+  return myTeamIds.value;
+});
+
+function getConversationAssigneeId(conversation) {
+  return Number(conversation.assignee_id ?? conversation.meta?.assignee?.id ?? 0);
+}
+
+function getConversationTeamId(conversation) {
+  return Number(conversation.team_id ?? conversation.meta?.team?.id ?? 0);
+}
+
+function isPendingTeamWithoutAgent(conversation) {
+  const assigneeId = getConversationAssigneeId(conversation);
+  const teamId = getConversationTeamId(conversation);
+
+  return (
+    conversation.status === 'pending' &&
+    !assigneeId &&
+    (!allowedTeamIds.value.length || allowedTeamIds.value.includes(teamId))
+  );
+}
+
+const agentTabCounts = computed(() => {
+  const baseFilters = {
+    inboxId: props.conversationInbox || undefined,
+    sortBy: activeSortBy.value,
+    labels: props.label ? [props.label] : undefined,
+    teamId: props.teamId || undefined,
+    conversationType: props.conversationType || undefined,
+    page: 1,
+  };
+
+  const openMine = mineChatsList.value({
+    ...baseFilters,
+    assigneeType: 'me',
+    status: 'open',
+  }).length;
+
+  const pendingTeam = unAssignedChatsList.value({
+    ...baseFilters,
+    assigneeType: 'unassigned',
+    status: 'pending',
+  }).filter(isPendingTeamWithoutAgent).length;
+
+  const resolvedMine = mineChatsList.value({
+    ...baseFilters,
+    assigneeType: 'me',
+    status: 'resolved',
+  }).length;
+
+  return {
+    openMine,
+    pendingTeam,
+    resolvedMine,
+  };
+});
+
+const assigneeTabItems = computed(() => {
+  if (isAdmin.value) {
     return filterItemsByPermission(
       ASSIGNEE_TYPE_TAB_PERMISSIONS,
       userPermissions.value,
@@ -206,23 +273,35 @@ const assigneeTabItems = computed(() => {
       name: t(`CHAT_LIST.ASSIGNEE_TYPE_TABS.${key}`),
       count: conversationStats.value[countKey] || 0,
     }));
-  } else {
-    // Força os 3 botões fixos com os nomes que você pediu para os Agentes
-    return [
-      { key: 'me', name: 'Abertas', count: conversationStats.value['mineCount'] || 0 },
-      { key: 'unassigned', name: 'Pendentes', count: conversationStats.value['unAssignedCount'] || 0 },
-      { key: 'all', name: 'Finalizadas', count: 0 } 
-    ];
   }
+
+  return [
+    {
+      key: 'me',
+      name: 'Abertas',
+      count: agentTabCounts.value.openMine,
+    },
+    {
+      key: 'unassigned',
+      name: 'Pendentes',
+      count: agentTabCounts.value.pendingTeam,
+    },
+    {
+      key: 'all',
+      name: 'Finalizadas',
+      count: agentTabCounts.value.resolvedMine,
+    },
+  ];
 });
 
-
-
 const showAssigneeInConversationCard = computed(() => {
-  return (
-    hasAppliedFiltersOrActiveFolders.value ||
-    activeAssigneeTab.value === wootConstants.ASSIGNEE_TYPE.ALL
-  );
+  if (hasAppliedFiltersOrActiveFolders.value) return true;
+
+  if (isAdmin.value) {
+    return activeAssigneeTab.value === wootConstants.ASSIGNEE_TYPE.ALL;
+  }
+
+  return false;
 });
 
 const currentPageFilterKey = computed(() => {
@@ -251,10 +330,10 @@ const conversationCustomAttributes = useFunctionGetter(
 );
 
 const activeAssigneeTabCount = computed(() => {
-  const count = assigneeTabItems.value.find(
+  const activeItem = assigneeTabItems.value.find(
     item => item.key === activeAssigneeTab.value
-  ).count;
-  return count;
+  );
+  return activeItem?.count || 0;
 });
 
 const conversationListPagination = computed(() => {
@@ -280,17 +359,17 @@ const conversationListPagination = computed(() => {
 const conversationFilters = computed(() => {
   let mappedAssigneeType = activeAssigneeTab.value;
   let mappedStatus = activeStatus.value;
-  const isAdmin = currentUser.value && currentUser.value.role === 'administrator';
 
-  // O pulo do gato: Forçamos o roteamento por baixo dos panos se for agente
-  if (!isAdmin) {
+  if (!isAdmin.value) {
     if (activeAssigneeTab.value === 'me') {
-      mappedStatus = 'open'; // Abertas -> força status open
+      mappedAssigneeType = 'me';
+      mappedStatus = 'open';
     } else if (activeAssigneeTab.value === 'unassigned') {
-      mappedStatus = 'open'; // Pendentes -> força status open
+      mappedAssigneeType = 'unassigned';
+      mappedStatus = 'pending';
     } else if (activeAssigneeTab.value === 'all') {
-      mappedAssigneeType = 'me'; // Finalizadas -> força puxar as "Meus"
-      mappedStatus = 'resolved'; // E força o status resolvido
+      mappedAssigneeType = 'me';
+      mappedStatus = 'resolved';
     }
   }
 
@@ -341,22 +420,46 @@ const pageTitle = computed(() => {
   return t('CHAT_LIST.TAB_HEADING');
 });
 
+const isRestrictedAgentView = computed(() => {
+  return !isAdmin.value && !hasAppliedFiltersOrActiveFolders.value;
+});
+
+const headerStatusLabel = computed(() => {
+  if (!isRestrictedAgentView.value) {
+    return t(`CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.${activeStatus.value}.TEXT`);
+  }
+
+  if (activeAssigneeTab.value === 'me') return 'Abertas';
+  if (activeAssigneeTab.value === 'unassigned') return 'Pendentes';
+  if (activeAssigneeTab.value === 'all') return 'Finalizadas';
+
+  return t(`CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.${activeStatus.value}.TEXT`);
+});
+
 const conversationList = computed(() => {
   let localConversationList = [];
 
   if (!hasAppliedFiltersOrActiveFolders.value) {
     const filters = conversationFilters.value;
-    const isAdmin = currentUser.value && currentUser.value.role === 'administrator';
 
-    if (!isAdmin && activeAssigneeTab.value === 'all') {
-       // Se o agente clicou em "Finalizadas", puxa o histórico apenas dele
-       localConversationList = [...mineChatsList.value(filters)];
-    } else if (activeAssigneeTab.value === 'me') {
-      localConversationList = [...mineChatsList.value(filters)];
-    } else if (activeAssigneeTab.value === 'unassigned') {
-      localConversationList = [...unAssignedChatsList.value(filters)];
+    if (!isAdmin.value) {
+      if (activeAssigneeTab.value === 'me') {
+        localConversationList = [...mineChatsList.value(filters)];
+      } else if (activeAssigneeTab.value === 'unassigned') {
+        localConversationList = [...unAssignedChatsList.value(filters)].filter(
+          isPendingTeamWithoutAgent
+        );
+      } else if (activeAssigneeTab.value === 'all') {
+        localConversationList = [...mineChatsList.value(filters)];
+      }
     } else {
-      localConversationList = [...allChatList.value(filters)];
+      if (activeAssigneeTab.value === 'me') {
+        localConversationList = [...mineChatsList.value(filters)];
+      } else if (activeAssigneeTab.value === 'unassigned') {
+        localConversationList = [...unAssignedChatsList.value(filters)];
+      } else {
+        localConversationList = [...allChatList.value(filters)];
+      }
     }
   } else {
     localConversationList = [...chatLists.value];
@@ -371,6 +474,7 @@ const conversationList = computed(() => {
 
   return localConversationList;
 });
+
 const showEndOfListMessage = computed(() => {
   return (
     conversationList.value.length &&
@@ -410,7 +514,7 @@ function emitConversationLoaded() {
 
 function fetchFilteredConversations(payload) {
   payload = useSnakeCase(payload);
-  let page = currentFiltersPage.value + 1;
+  const page = currentFiltersPage.value + 1;
   store
     .dispatch('fetchFilteredConversations', {
       queryData: filterQueryGenerator(payload),
@@ -423,7 +527,7 @@ function fetchFilteredConversations(payload) {
 
 function fetchSavedFilteredConversations(payload) {
   payload = useSnakeCase(payload);
-  let page = currentFiltersPage.value + 1;
+  const page = currentFiltersPage.value + 1;
   store
     .dispatch('fetchFilteredConversations', {
       queryData: payload,
@@ -474,24 +578,14 @@ function onCloseDeleteFoldersModal() {
 }
 
 function setParamsForEditFolderModal() {
-  // Here we are setting the params for edit folder modal to show the existing values.
-
-  // For agent, team, inboxes,and campaigns we get only the id's from the query.
-  // So we are mapping the id's to the actual values.
-
-  // For labels we get the name of the label from the query.
-  // If we delete the label from the label list then we will not be able to show the label name.
-
-  // For custom attributes we get only attribute key.
-  // So we are mapping it to find the input type of the attribute to show in the edit folder modal.
   return {
     agents: agentList.value,
     teams: teamsList.value,
     inboxes: inboxesList.value,
     labels: labels.value,
     campaigns: campaigns.value,
-    languages: languages,
-    countries: countries,
+    languages,
+    countries,
     priority: [
       { id: 'low', name: t('CONVERSATION.PRIORITY.OPTIONS.LOW') },
       { id: 'medium', name: t('CONVERSATION.PRIORITY.OPTIONS.MEDIUM') },
@@ -509,12 +603,11 @@ function initializeExistingFilterToModal() {
     currentUserDetails.value,
     activeAssigneeTab.value
   );
-  // TODO: Remove the usage of useCamelCase after migrating useFilter to camelcase
+
   if (statusFilter) {
     appliedFilter.value = [...appliedFilter.value, useCamelCase(statusFilter)];
   }
 
-  // TODO: Remove the usage of useCamelCase after migrating useFilter to camelcase
   const otherFilters = initializeInboxTeamAndLabelFilterToModal(
     props.conversationInbox,
     inbox.value,
@@ -527,12 +620,6 @@ function initializeExistingFilterToModal() {
 }
 
 function initializeFolderToFilterModal(newActiveFolder) {
-  // Here we are setting the params for edit folder modal.
-  //  To show the existing values. when we click on edit folder button.
-
-  // Here we get the query from the active folder.
-  // And we are mapping the query to the actual values.
-  // To show in the edit folder modal by the help of generateValuesForEditCustomViews helper.
   const query = unref(newActiveFolder)?.query?.payload;
   if (!Array.isArray(query)) return;
 
@@ -592,13 +679,16 @@ function resetAndFetchData() {
   store.dispatch('conversationPage/reset');
   store.dispatch('emptyAllConversations');
   store.dispatch('clearConversationFilters');
+
   if (hasActiveFolders.value) {
     const payload = activeFolder.value.query;
     fetchSavedFilteredConversations(payload);
   }
+
   if (props.foldersId) {
     return;
   }
+
   fetchConversations();
 }
 
@@ -617,9 +707,6 @@ function loadMoreConversations() {
   }
 }
 
-// Use IntersectionObserver instead of @scroll since Virtualizer only emits on user scroll.
-// If the list doesn’t fill the viewport, loading can stall.
-// IntersectionObserver triggers as soon as the sentinel is visible.
 const intersectionObserverOptions = computed(() => ({
   root: conversationListRef.value,
   rootMargin: '100px 0px 100px 0px',
@@ -638,7 +725,9 @@ function updateAssigneeTab(selectedTab) {
 
 function onBasicFilterChange(value, type) {
   if (type === 'status') {
-    activeStatus.value = value;
+    if (isAdmin.value) {
+      activeStatus.value = value;
+    }
   } else {
     activeSortBy.value = value;
   }
@@ -675,10 +764,11 @@ function redirectToConversationList() {
   } else if (isOnUnattendedView({ route: { name } })) {
     conversationType = 'unattended';
   }
+
   router.push(
     conversationListPageURL({
       accountId,
-      conversationType: conversationType,
+      conversationType,
       customViewId: props.foldersId,
       inboxId,
       label,
@@ -692,6 +782,7 @@ async function assignPriority(priority, conversationId = null) {
     priority,
     conversationId,
   });
+
   store.dispatch('assignPriority', { conversationId, priority }).then(() => {
     useTrack(CONVERSATION_EVENTS.CHANGE_PRIORITY, {
       newValue: priority,
@@ -712,16 +803,17 @@ async function markAsUnread(conversationId) {
       id: conversationId,
     });
     redirectToConversationList();
-  } catch (error) {
+  } catch {
     // Ignore error
   }
 }
+
 async function markAsRead(conversationId) {
   try {
     await store.dispatch('markMessagesRead', {
       id: conversationId,
     });
-  } catch (error) {
+  } catch {
     // Ignore error
   }
 }
@@ -738,7 +830,7 @@ async function onAssignTeam(team, conversationId = null) {
         conversationId,
       })
     );
-  } catch (error) {
+  } catch {
     useAlert(t('CONVERSATION.CARD_CONTEXT_MENU.API.TEAM_ASSIGNMENT.FAILED'));
   }
 }
@@ -770,7 +862,6 @@ function handleResolveConversation(conversationId, status, snoozedUntil) {
     return;
   }
 
-  // Check for required attributes before resolving
   const conversation = getConversationById.value(conversationId);
   const currentCustomAttributes = conversation?.custom_attributes || {};
   const { hasMissing, missing } = checkMissingAttributes(
@@ -778,7 +869,6 @@ function handleResolveConversation(conversationId, status, snoozedUntil) {
   );
 
   if (hasMissing) {
-    // Pass conversation context through the modal's API
     const conversationContext = {
       id: conversationId,
       snoozedUntil,
@@ -835,6 +925,7 @@ onMounted(() => {
   store.dispatch('setChatStatusFilter', activeStatus.value);
   store.dispatch('setChatSortFilter', activeSortBy.value);
   resetAndFetchData();
+
   if (hasActiveFolders.value) {
     store.dispatch('campaigns/get');
   }
@@ -850,7 +941,7 @@ async function deleteConversation() {
     selectedConversationId.value = null;
     deleteConversationDialogRef.value.close();
     useAlert(t('CONVERSATION.SUCCESS_DELETE_CONVERSATION'));
-  } catch (error) {
+  } catch {
     useAlert(t('CONVERSATION.FAIL_DELETE_CONVERSATION'));
   }
 }
@@ -905,6 +996,17 @@ watch(conversationFilters, (newVal, oldVal) => {
     store.dispatch('updateChatListFilters', newVal);
   }
 });
+
+// Debug temporário para validar se currentUser traz teams
+// Remova depois de confirmar o payload
+watch(
+  currentUser,
+  val => {
+    console.log('CURRENT USER', val);
+    console.log('MY TEAM IDS', myTeamIds.value);
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
@@ -924,6 +1026,8 @@ watch(conversationFilters, (newVal, oldVal) => {
       :is-on-expanded-layout="isOnExpandedLayout"
       :conversation-stats="conversationStats"
       :is-list-loading="chatListLoading && !conversationList.length"
+      :status-chip-label="headerStatusLabel"
+      :hide-basic-status-filter="isRestrictedAgentView"
       @add-folders="onClickOpenAddFoldersModal"
       @delete-folders="onClickOpenDeleteFoldersModal"
       @filters-modal="onToggleAdvanceFiltersModal"
@@ -966,6 +1070,7 @@ watch(conversationFilters, (newVal, oldVal) => {
     >
       {{ $t('CHAT_LIST.LIST.404') }}
     </p>
+
     <ConversationBulkActions
       v-if="selectedConversations.length"
       :conversations="selectedConversations"
@@ -980,6 +1085,7 @@ watch(conversationFilters, (newVal, oldVal) => {
       @assign-labels="onAssignLabels"
       @assign-team="onAssignTeamsForBulk"
     />
+
     <div
       ref="conversationListRef"
       class="flex-1 min-h-0 overflow-y-auto conversations-list"
@@ -1002,21 +1108,25 @@ watch(conversationFilters, (newVal, oldVal) => {
           @de-select-conversation="deSelectConversation"
         />
       </Virtualizer>
+
       <div v-if="chatListLoading" class="flex justify-center my-4">
         <Spinner class="text-n-brand" />
       </div>
+
       <p
         v-else-if="showEndOfListMessage"
         class="p-4 text-center text-n-slate-11"
       >
         {{ $t('CHAT_LIST.EOF') }}
       </p>
+
       <IntersectionObserver
         v-else
         :options="intersectionObserverOptions"
         @observed="loadMoreConversations"
       />
     </div>
+
     <Dialog
       ref="deleteConversationDialogRef"
       type="alert"
@@ -1030,6 +1140,7 @@ watch(conversationFilters, (newVal, oldVal) => {
       @confirm="deleteConversation"
       @close="selectedConversationId = null"
     />
+
     <TeleportWithDirection
       v-if="showAdvancedFilters"
       to="#conversationFilterTeleportTarget"
@@ -1043,6 +1154,7 @@ watch(conversationFilters, (newVal, oldVal) => {
         @close="closeAdvanceFiltersModal"
       />
     </TeleportWithDirection>
+
     <ConversationResolveAttributesModal
       ref="resolveAttributesModalRef"
       @submit="handleResolveWithAttributes"

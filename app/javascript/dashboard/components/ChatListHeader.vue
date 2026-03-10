@@ -16,6 +16,8 @@ const props = defineProps({
   isOnExpandedLayout: { type: Boolean, required: true },
   conversationStats: { type: Object, required: true },
   isListLoading: { type: Boolean, required: true },
+  statusChipLabel: { type: String, default: '' },
+  hideBasicStatusFilter: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -44,10 +46,12 @@ const toggleConversationLayout = () => {
   const {
     conversation_display_type: conversationDisplayType = LAYOUT_TYPES.CONDENSED,
   } = uiSettings.value;
+
   const newViewType =
     conversationDisplayType === LAYOUT_TYPES.CONDENSED
       ? LAYOUT_TYPES.EXPANDED
       : LAYOUT_TYPES.CONDENSED;
+
   updateUISettings({
     conversation_display_type: newViewType,
     previously_used_conversation_display_type: newViewType,
@@ -69,6 +73,7 @@ const toggleConversationLayout = () => {
       >
         {{ pageTitle }}
       </h1>
+
       <span
         v-if="
           allCount > 0 && hasAppliedFiltersOrActiveFolders && !isListLoading
@@ -78,13 +83,18 @@ const toggleConversationLayout = () => {
       >
         {{ formattedAllCount }}
       </span>
+
       <span
         v-if="!hasAppliedFiltersOrActiveFolders"
         class="px-2 py-1 my-0.5 mx-1 rounded-md capitalize bg-n-slate-3 text-xxs text-n-slate-12 shrink-0"
       >
-        {{ $t(`CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.${activeStatus}.TEXT`) }}
+        {{
+          statusChipLabel ||
+          $t(`CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.${activeStatus}.TEXT`)
+        }}
       </span>
     </div>
+
     <div class="flex items-center gap-1">
       <template v-if="hasAppliedFilters && !hasActiveFolders">
         <div class="relative">
@@ -102,6 +112,7 @@ const toggleConversationLayout = () => {
             :class="{ 'ltr:right-0 rtl:left-0': isOnExpandedLayout }"
           />
         </div>
+
         <NextButton
           v-tooltip.top-end="$t('FILTER.CLEAR_BUTTON_LABEL')"
           icon="i-lucide-circle-x"
@@ -111,6 +122,7 @@ const toggleConversationLayout = () => {
           @click="emit('resetFilters')"
         />
       </template>
+
       <template v-if="hasActiveFolders">
         <div class="relative">
           <NextButton
@@ -128,6 +140,7 @@ const toggleConversationLayout = () => {
             :class="{ 'ltr:right-0 rtl:left-0': isOnExpandedLayout }"
           />
         </div>
+
         <NextButton
           id="toggleConversationFilterButton"
           v-tooltip.top-end="$t('FILTER.CUSTOM_VIEWS.DELETE.DELETE_BUTTON')"
@@ -138,6 +151,7 @@ const toggleConversationLayout = () => {
           @click="emit('deleteFolders')"
         />
       </template>
+
       <div v-else class="relative">
         <NextButton
           id="toggleConversationFilterButton"
@@ -154,11 +168,13 @@ const toggleConversationLayout = () => {
           :class="{ 'ltr:right-0 rtl:left-0': isOnExpandedLayout }"
         />
       </div>
+
       <ConversationBasicFilter
-        v-if="!hasAppliedFiltersOrActiveFolders"
+        v-if="!hasAppliedFiltersOrActiveFolders && !hideBasicStatusFilter"
         :is-on-expanded-layout="isOnExpandedLayout"
         @change-filter="onBasicFilterChange"
       />
+
       <SwitchLayout
         :is-on-expanded-layout="isOnExpandedLayout"
         @toggle="toggleConversationLayout"
