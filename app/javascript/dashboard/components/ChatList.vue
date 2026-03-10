@@ -755,6 +755,8 @@ async function fetchTab(tabKey, { append = false } = {}) {
         ? rawRows.filter(isPendingTeamWithoutAgent)
         : rawRows;
 
+    mirrorRowsToStore(rows);
+
     if (append) {
       tab.items = dedupeConversations([...tab.items, ...rows]);
       tab.page = nextPage;
@@ -1218,10 +1220,23 @@ function toggleSelectAll(check) {
   selectAllConversations(check, conversationList);
 }
 
+function mirrorRowsToStore(rows) {
+  rows.forEach(conversation => {
+    const existingConversation = getConversationById.value(conversation.id);
+
+    if (!existingConversation) {
+      store.dispatch('addConversation', conversation);
+    }
+
+    store.dispatch('updateConversation', conversation);
+  });
+}
+
 useEmitter('fetch_conversation_stats', () => {
   if (hasAppliedFiltersOrActiveFolders.value) return;
   store.dispatch('conversationStats/get', conversationFilters.value);
 });
+
 
 onMounted(async () => {
   try {
