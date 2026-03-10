@@ -93,8 +93,6 @@ const activeAssigneeTab = ref(wootConstants.ASSIGNEE_TYPE.ME);
 const activeStatus = ref(wootConstants.STATUS_TYPE.OPEN);
 const activeSortBy = ref(wootConstants.SORT_BY_TYPE.LAST_ACTIVITY_AT_DESC);
 const showAdvancedFilters = ref(false);
-// chatsOnView is to store the chats that are currently visible on the screen,
-// which mirrors the conversationList.
 const chatsOnView = ref([]);
 const foldersQuery = ref({});
 const showAddFoldersModal = ref(false);
@@ -124,11 +122,11 @@ const inboxesList = useMapGetter('inboxes/getInboxes');
 const campaigns = useMapGetter('campaigns/getAllCampaigns');
 const labels = useMapGetter('labels/getLabels');
 const currentAccountId = useMapGetter('getCurrentAccountId');
-// We can't useFunctionGetter here since it needs to be called on setup?
 const getTeamFn = useMapGetter('teams/getTeam');
 const getConversationById = useMapGetter('getConversationById');
 
 useChatListKeyboardEvents(conversationListRef);
+
 const {
   selectedConversations,
   selectedInboxes,
@@ -196,24 +194,63 @@ const isAdmin = computed(() => {
   return currentUser.value?.role === 'administrator';
 });
 
+function normalizeTeamMemberId(member) {
+  if (typeof member === 'number' || typeof member === 'string') {
+    return Number(member);
+  }
+
+  return Number(
+    member?.id ??
+      member?.user_id ??
+      member?.agent_id ??
+      0
+  );
+}
+
+function getTeamMembers(team) {
+  return [
+    ...(Array.isArray(team?.agents) ? team.agents : []),
+    ...(Array.isArray(team?.users) ? team.users : []),
+    ...(Array.isArray(team?.members) ? team.members : []),
+    ...(Array.isArray(team?.agent_ids) ? team.agent_ids : []),
+    ...(Array.isArray(team?.user_ids) ? team.user_ids : []),
+  ];
+}
+
 const myTeamIds = computed(() => {
-  // Ajuste aqui se no seu payload o caminho real das equipes for outro
-  const teams = currentUser.value?.teams || [];
-  return teams.map(team => Number(team.id)).filter(Boolean);
+  const userId = Number(currentUser.value?.id || 0);
+  const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
+
+  if (!userId || !teams.length) return [];
+
+  return teams
+    .filter(team => {
+      const members = getTeamMembers(team);
+      return members.some(member => normalizeTeamMemberId(member) === userId);
+    })
+    .map(team => Number(team.id))
+    .filter(Boolean);
 });
 
 const allowedTeamIds = computed(() => {
-  // Se estiver dentro de uma rota de time específico, respeita ela
   if (props.teamId) return [Number(props.teamId)];
   return myTeamIds.value;
 });
 
 function getConversationAssigneeId(conversation) {
-  return Number(conversation.assignee_id ?? conversation.meta?.assignee?.id ?? 0);
+  return Number(
+    conversation.assignee_id ??
+      conversation.meta?.assignee?.id ??
+      0
+  );
 }
 
 function getConversationTeamId(conversation) {
-  return Number(conversation.team_id ?? conversation.meta?.team?.id ?? 0);
+  return Number(
+    conversation.team_id ??
+      conversation.meta?.team?.id ??
+      0
+  );
 }
 
 function isPendingTeamWithoutAgent(conversation) {
@@ -223,7 +260,7 @@ function isPendingTeamWithoutAgent(conversation) {
   return (
     conversation.status === 'pending' &&
     !assigneeId &&
-    (!allowedTeamIds.value.length || allowedTeamIds.value.includes(teamId))
+    allowedTeamIds.value.includes(teamId)
   );
 }
 
@@ -500,6 +537,7 @@ const uniqueInboxes = computed(() => {
 function setFiltersFromUISettings() {
   const { conversations_filter_by: filterBy = {} } = uiSettings.value;
   const { status, order_by: orderBy } = filterBy;
+
   activeStatus.value = status || wootConstants.STATUS_TYPE.OPEN;
   activeSortBy.value = Object.values(wootConstants.SORT_BY_TYPE).includes(
     orderBy
@@ -515,6 +553,7 @@ function emitConversationLoaded() {
 function fetchFilteredConversations(payload) {
   payload = useSnakeCase(payload);
   const page = currentFiltersPage.value + 1;
+
   store
     .dispatch('fetchFilteredConversations', {
       queryData: filterQueryGenerator(payload),
@@ -528,6 +567,7 @@ function fetchFilteredConversations(payload) {
 function fetchSavedFilteredConversations(payload) {
   payload = useSnakeCase(payload);
   const page = currentFiltersPage.value + 1;
+
   store
     .dispatch('fetchFilteredConversations', {
       queryData: payload,
@@ -717,6 +757,7 @@ function updateAssigneeTab(selectedTab) {
     resetBulkActions();
     emitter.emit('clearSearchInput');
     activeAssigneeTab.value = selectedTab;
+
     if (!currentPage.value) {
       fetchConversations();
     }
@@ -731,12 +772,14 @@ function onBasicFilterChange(value, type) {
   } else {
     activeSortBy.value = value;
   }
+
   resetAndFetchData();
 }
 
 function openLastSavedItemInFolder() {
   const lastItemOfFolder = folders.value[folders.value.length - 1];
   const lastItemId = lastItemOfFolder.id;
+
   router.push({
     name: 'folder_conversations',
     params: { id: lastItemId },
@@ -901,6 +944,7 @@ function handleResolveWithAttributes({ attributes, context }) {
 
 function allSelectedConversationsStatus(status) {
   if (!selectedConversations.value.length) return false;
+
   return selectedConversations.value.every(item => {
     return getConversationById.value(item)?.status === status;
   });
@@ -919,7 +963,13 @@ useEmitter('fetch_conversation_stats', () => {
   store.dispatch('conversationStats/get', conversationFilters.value);
 });
 
-onMounted(() => {
+onMounted(async () => {
+  try {
+    await store.dispatch('teams/get');
+  } catch {
+    // ignora, segue com a tela
+  }
+
   store.dispatch('setChatListFilters', conversationFilters.value);
   setFiltersFromUISettings();
   store.dispatch('setChatStatusFilter', activeStatus.value);
@@ -971,10 +1021,12 @@ watch(
   computed(() => props.conversationInbox),
   () => resetAndFetchData()
 );
+
 watch(
   computed(() => props.label),
   () => resetAndFetchData()
 );
+
 watch(
   computed(() => props.conversationType),
   () => resetAndFetchData()
@@ -996,17 +1048,6 @@ watch(conversationFilters, (newVal, oldVal) => {
     store.dispatch('updateChatListFilters', newVal);
   }
 });
-
-// Debug temporário para validar se currentUser traz teams
-// Remova depois de confirmar o payload
-watch(
-  currentUser,
-  val => {
-    console.log('CURRENT USER', val);
-    console.log('MY TEAM IDS', myTeamIds.value);
-  },
-  { immediate: true }
-);
 </script>
 
 <template>
@@ -1018,6 +1059,7 @@ watch(
     ]"
   >
     <slot />
+
     <ChatListHeader
       :page-title="pageTitle"
       :has-applied-filters="hasAppliedFilters"
