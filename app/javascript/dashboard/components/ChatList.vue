@@ -199,12 +199,7 @@ function normalizeTeamMemberId(member) {
     return Number(member);
   }
 
-  return Number(
-    member?.id ??
-      member?.user_id ??
-      member?.agent_id ??
-      0
-  );
+  return Number(member?.id ?? member?.user_id ?? member?.agent_id ?? 0);
 }
 
 function getTeamMembers(team) {
@@ -238,19 +233,11 @@ const allowedTeamIds = computed(() => {
 });
 
 function getConversationAssigneeId(conversation) {
-  return Number(
-    conversation.assignee_id ??
-      conversation.meta?.assignee?.id ??
-      0
-  );
+  return Number(conversation.assignee_id ?? conversation.meta?.assignee?.id ?? 0);
 }
 
 function getConversationTeamId(conversation) {
-  return Number(
-    conversation.team_id ??
-      conversation.meta?.team?.id ??
-      0
-  );
+  return Number(conversation.team_id ?? conversation.meta?.team?.id ?? 0);
 }
 
 function isPendingTeamWithoutAgent(conversation) {
@@ -554,7 +541,7 @@ function fetchFilteredConversations(payload) {
   payload = useSnakeCase(payload);
   const page = currentFiltersPage.value + 1;
 
-  store
+  const request = store
     .dispatch('fetchFilteredConversations', {
       queryData: filterQueryGenerator(payload),
       page,
@@ -562,13 +549,14 @@ function fetchFilteredConversations(payload) {
     .then(emitConversationLoaded);
 
   showAdvancedFilters.value = false;
+  return request;
 }
 
 function fetchSavedFilteredConversations(payload) {
   payload = useSnakeCase(payload);
   const page = currentFiltersPage.value + 1;
 
-  store
+  return store
     .dispatch('fetchFilteredConversations', {
       queryData: payload,
       page,
@@ -708,9 +696,9 @@ function onToggleAdvanceFiltersModal() {
   showAdvancedFilters.value = true;
 }
 
-function fetchConversations() {
-  store.dispatch('updateChatListFilters', conversationFilters.value);
-  store.dispatch('fetchAllConversations').then(emitConversationLoaded);
+function fetchConversations(filters = conversationFilters.value) {
+  store.dispatch('updateChatListFilters', filters);
+  return store.dispatch('fetchAllConversations').then(emitConversationLoaded);
 }
 
 function resetAndFetchData() {
@@ -722,14 +710,43 @@ function resetAndFetchData() {
 
   if (hasActiveFolders.value) {
     const payload = activeFolder.value.query;
-    fetchSavedFilteredConversations(payload);
+    return fetchSavedFilteredConversations(payload);
   }
 
   if (props.foldersId) {
-    return;
+    return Promise.resolve();
   }
 
-  fetchConversations();
+  return fetchConversations();
+}
+
+function getResolvedPrefetchFilters() {
+  return {
+    inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+    assigneeType: 'me',
+    status: 'resolved',
+    sortBy: activeSortBy.value,
+    page: 1,
+    labels: props.label ? [props.label] : undefined,
+    teamId: props.teamId || undefined,
+    conversationType: props.conversationType || undefined,
+  };
+}
+
+async function prefetchResolvedConversations() {
+  if (isAdmin.value) return;
+  if (hasAppliedFiltersOrActiveFolders.value) return;
+
+  const currentFiltersSnapshot = { ...conversationFilters.value };
+  const resolvedFilters = getResolvedPrefetchFilters();
+
+  try {
+    await fetchConversations(resolvedFilters);
+  } catch {
+    // ignora falha do pré-carregamento
+  } finally {
+    store.dispatch('updateChatListFilters', currentFiltersSnapshot);
+  }
 }
 
 function loadMoreConversations() {
@@ -753,15 +770,23 @@ const intersectionObserverOptions = computed(() => ({
 }));
 
 function updateAssigneeTab(selectedTab) {
-  if (activeAssigneeTab.value !== selectedTab) {
-    resetBulkActions();
-    emitter.emit('clearSearchInput');
-    activeAssigneeTab.value = selectedTab;
+  if (activeAssigneeTab.value === selectedTab) return;
 
-    if (!currentPage.value) {
-      fetchConversations();
+  resetBulkActions();
+  emitter.emit('clearSearchInput');
+  activeAssigneeTab.value = selectedTab;
+
+  if (!isAdmin.value) {
+    if (selectedTab === 'me') {
+      activeStatus.value = 'open';
+    } else if (selectedTab === 'unassigned') {
+      activeStatus.value = 'pending';
+    } else if (selectedTab === 'all') {
+      activeStatus.value = 'resolved';
     }
   }
+
+  resetAndFetchData();
 }
 
 function onBasicFilterChange(value, type) {
@@ -970,11 +995,13 @@ onMounted(async () => {
     // ignora, segue com a tela
   }
 
-  store.dispatch('setChatListFilters', conversationFilters.value);
   setFiltersFromUISettings();
+  store.dispatch('setChatListFilters', conversationFilters.value);
   store.dispatch('setChatStatusFilter', activeStatus.value);
   store.dispatch('setChatSortFilter', activeSortBy.value);
-  resetAndFetchData();
+
+  await resetAndFetchData();
+  await prefetchResolvedConversations();
 
   if (hasActiveFolders.value) {
     store.dispatch('campaigns/get');
