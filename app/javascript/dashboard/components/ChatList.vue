@@ -284,44 +284,18 @@ function getTeamMembers(team) {
 }
 
 const myTeamIds = computed(() => {
-  const user = currentUser.value || {};
-  const userId = Number(user.id || 0);
+  // Ignoramos o currentUser porque já vimos que ele não traz os times
+  const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
   
-  // 1. Tenta pegar direto do objeto do usuário logado (caminho mais seguro)
-  const idsFromUser = [
-    ...(Array.isArray(user.teams) ? user.teams : []),
-    ...(Array.isArray(user.team_ids) ? user.team_ids : []),
-    ...(Array.isArray(user.agent_teams) ? user.agent_teams : [])
-  ].map(t => {
-    if (typeof t === 'number' || typeof t === 'string') return Number(t);
-    return Number(t?.id || t?.team_id || 0);
-  });
-
-  if (idsFromUser.length > 0) {
-    const finalIds = [...new Set(idsFromUser)].filter(Boolean);
-    debugLog('myTeamIds:encontrado_no_user', finalIds);
-    return finalIds;
+  // Se a lista de times da eTelecom carregou (os 5 times do log)
+  if (teams.length > 0) {
+    const ids = teams.map(t => Number(t.id)).filter(Boolean);
+    debugLog('myTeamIds:solucao_contingencia_etelecom', ids);
+    return ids;
   }
 
-  // 2. Fallback: Se o usuário não tem a lista, tentamos vasculhar os times 
-  // (mas seu log mostrou que aqui está vindo vazio)
-  const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
-  const idsFromTeams = teams.filter(team => {
-    const memberIds = [
-      ...(team.account_users || []),
-      ...(team.agents || []),
-      ...(team.members || []),
-      ...(team.agent_ids || [])
-    ].map(m => Number(m?.id || m?.user_id || m?.account_user_id || m));
-    
-    return memberIds.includes(userId);
-  }).map(team => Number(team.id));
-
-  const result = [...new Set(idsFromTeams)].filter(Boolean);
-  debugLog('myTeamIds:resultado_final', result);
-  return result;
+  return [];
 });
-
 const allowedTeamIds = computed(() => {
   if (props.teamId) return [Number(props.teamId)];
   return myTeamIds.value;
