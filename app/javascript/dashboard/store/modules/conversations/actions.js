@@ -233,33 +233,39 @@ const actions = {
     commit(types.ASSIGN_AGENT, { conversationId, assignee });
   },
 
-    assignTeam: async ({ dispatch }, { conversationId, teamId }) => {
+ assignTeam: async ({ dispatch, commit }, { conversationId, teamId }) => {
     try {
-      // 1. Torna Pendente
+      // 1. FORÇAMOS O STATUS PENDENTE (Fazemos enquanto você ainda é o "dono")
       await dispatch('toggleStatus', { 
         conversationId, 
         status: 'pending' 
       });
 
-      // 2. Tira o Agente (deixa sem dono)
+      // 2. DESATRIBUIMOS (Tiramos o agente)
       await dispatch('assignAgent', {
         conversationId,
         agentId: 0, 
       });
 
-      // 3. Muda o Time
+      // 3. MUDAMOS O TIME (O empurrão final para a nova equipe)
       const response = await ConversationApi.assignTeam({
         conversationId,
         teamId,
       });
-      
-      // Atualiza o time na tela
-      dispatch('setCurrentChatTeam', { team: response.data, conversationId });
 
+      // 4. ATUALIZAMOS O VUEX
+      dispatch('setCurrentChatTeam', { team: response.data, conversationId });
+      
+      // Limpeza forçada para a Sidebar (imagem que você mandou) atualizar o "Nenhum"
+      commit(types.ASSIGN_AGENT, { conversationId, assignee: null });
+
+      debugLog('Fluxo Completo eTelecom: Pendente -> Desatribuído -> Novo Time');
     } catch (error) {
-      console.error('Erro na transferência:', error);
+      console.error('Erro ao transferir:', error);
     }
   },
+
+  
 
   setCurrentChatTeam({ commit }, { team, conversationId }) {
     commit(types.ASSIGN_TEAM, { team, conversationId });
