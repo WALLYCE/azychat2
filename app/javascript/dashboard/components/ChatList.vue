@@ -284,43 +284,43 @@ function getTeamMembers(team) {
 }
 
 const myTeamIds = computed(() => {
-  const userId = currentUserId.value;
-  const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
+  const user = currentUser.value || {};
+  const userId = Number(user.id || 0);
   
-  if (!userId || !teams.length) return [];
+  // 1. Tenta pegar direto do objeto do usuário logado (caminho mais seguro)
+  const idsFromUser = [
+    ...(Array.isArray(user.teams) ? user.teams : []),
+    ...(Array.isArray(user.team_ids) ? user.team_ids : []),
+    ...(Array.isArray(user.agent_teams) ? user.agent_teams : [])
+  ].map(t => {
+    if (typeof t === 'number' || typeof t === 'string') return Number(t);
+    return Number(t?.id || t?.team_id || 0);
+  });
 
-  const ids = teams
-    .filter(team => {
-      // Coleta todos os membros de todas as formas possíveis
-      const members = [
-        ...(team.agents || []),
-        ...(team.users || []),
-        ...(team.members || []),
-        ...(team.account_users || [])
-      ];
+  if (idsFromUser.length > 0) {
+    const finalIds = [...new Set(idsFromUser)].filter(Boolean);
+    debugLog('myTeamIds:encontrado_no_user', finalIds);
+    return finalIds;
+  }
 
-      // Debug interno para um dos times para entendermos a estrutura
-      if (team === teams) {
-        debugLog('myTeamIds:exemplo_estrutura_time', {
-          teamId: team.id,
-          memberSample: members,
-          userIdToMatch: userId
-        });
-      }
+  // 2. Fallback: Se o usuário não tem a lista, tentamos vasculhar os times 
+  // (mas seu log mostrou que aqui está vindo vazio)
+  const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
+  const idsFromTeams = teams.filter(team => {
+    const memberIds = [
+      ...(team.account_users || []),
+      ...(team.agents || []),
+      ...(team.members || []),
+      ...(team.agent_ids || [])
+    ].map(m => Number(m?.id || m?.user_id || m?.account_user_id || m));
+    
+    return memberIds.includes(userId);
+  }).map(team => Number(team.id));
 
-      // Verifica se o seu ID (18) está em algum lugar desse time
-      return members.some(m => {
-        const mId = Number(m?.id || m?.user_id || m?.agent_id || m?.account_user_id || m);
-        return mId === userId;
-      }) || (team.agent_ids || []).map(Number).includes(userId);
-    })
-    .map(team => Number(team.id));
-
-  const result = [...new Set(ids)].filter(Boolean);
-  debugLog('myTeamIds:resultado', result);
+  const result = [...new Set(idsFromTeams)].filter(Boolean);
+  debugLog('myTeamIds:resultado_final', result);
   return result;
 });
-
 
 const allowedTeamIds = computed(() => {
   if (props.teamId) return [Number(props.teamId)];
