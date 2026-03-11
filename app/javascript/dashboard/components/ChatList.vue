@@ -262,11 +262,15 @@ function normalizeTeamId(item) {
 }
 
 function normalizeTeamMemberId(member) {
-  if (typeof member === 'number' || typeof member === 'string') {
-    return Number(member);
-  }
-
-  return Number(member?.id ?? member?.user_id ?? member?.agent_id ?? 0);
+  if (!member) return 0;
+  if (typeof member === 'number' || typeof member === 'string') return Number(member);
+  return Number(
+    member.id || 
+    member.user_id || 
+    member.agent_id || 
+    member.account_user_id || 
+    member.user?.id || 0
+  );
 }
 
 function getTeamMembers(team) {
@@ -279,19 +283,6 @@ function getTeamMembers(team) {
   ];
 }
 
-function normalizeTeamMemberId(member) {
-  if (!member) return 0;
-  if (typeof member === 'number' || typeof member === 'string') return Number(member);
-  // Tenta todos os campos possíveis de ID de usuário no Chatwoot
-  return Number(
-    member.id || 
-    member.user_id || 
-    member.agent_id || 
-    member.account_user_id || 
-    member.user?.id || 0
-  );
-}
-
 const myTeamIds = computed(() => {
   const userId = currentUserId.value;
   const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
@@ -300,7 +291,6 @@ const myTeamIds = computed(() => {
 
   const ids = teams
     .filter(team => {
-      // 1. Verifica em múltiplos campos de arrays de membros
       const members = [
         ...(Array.isArray(team.agents) ? team.agents : []),
         ...(Array.isArray(team.users) ? team.users : []),
@@ -308,7 +298,6 @@ const myTeamIds = computed(() => {
         ...(Array.isArray(team.account_users) ? team.account_users : [])
       ];
 
-      // 2. Se o array estiver vazio, tenta verificar IDs puros (algumas APIs retornam só IDs)
       const memberIds = [
         ...(Array.isArray(team.agent_ids) ? team.agent_ids : []),
         ...(Array.isArray(team.user_ids) ? team.user_ids : [])
@@ -321,12 +310,8 @@ const myTeamIds = computed(() => {
     })
     .map(team => Number(team.id));
 
-  const uniqueIds = [...new Set(ids)].filter(Boolean);
-  debugLog('myTeamIds:resultado_final', { userId, foundCount: uniqueIds.length, ids: uniqueIds });
-  return uniqueIds;
+  return [...new Set(ids)].filter(Boolean);
 });
-
-
 const allowedTeamIds = computed(() => {
   if (props.teamId) return [Number(props.teamId)];
   return myTeamIds.value;
