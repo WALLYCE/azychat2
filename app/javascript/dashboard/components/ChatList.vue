@@ -286,6 +286,7 @@ const myTeamIds = computed(() => {
     .filter(Boolean);
 
   if (explicitTeamIds.length) {
+    debugLog('myTeamIds:source', 'teams.members');
     return [...new Set(explicitTeamIds)];
   }
 
@@ -308,13 +309,12 @@ const myTeamIds = computed(() => {
     .filter(Boolean);
 
   if (currentUserTeamIds.length) {
+    debugLog('myTeamIds:source', 'currentUser');
     return [...new Set(currentUserTeamIds)];
   }
 
-  // Fallback importante:
-  // em alguns cenários o endpoint teams/get já retorna apenas os times visíveis
-  // para o agente atual, sem embutir membros. Nesses casos usamos todos os ids.
-  return [...new Set(teams.map(team => Number(team.id)).filter(Boolean))];
+  debugLog('myTeamIds:source', 'none');
+  return [];
 });
 
 const allowedTeamIds = computed(() => {
@@ -347,6 +347,18 @@ function isConversationInTeamScope(conversation) {
   }
 
   return allowedTeamIds.value.includes(conversationTeamId);
+}
+
+function isPendingTeamWithoutAgent(conversation) {
+  const assigneeId = getConversationAssigneeId(conversation);
+  const teamId = getConversationTeamId(conversation);
+
+  return (
+    conversation.status === 'pending' &&
+    !assigneeId &&
+    isConversationInTeamScope(conversation) &&
+    teamId > 0
+  );
 }
 
 function isPendingFromMyTeams(conversation) {
@@ -397,6 +409,9 @@ function belongsToTab(conversation, tabKey) {
   }
 
   if (tabKey === 'unassigned') {
+    if (props.teamId) {
+      return isPendingTeamWithoutAgent(conversation);
+    }
     return isPendingFromMyTeams(conversation);
   }
 
@@ -573,7 +588,7 @@ const conversationFilters = computed(() => {
       mappedAssigneeType = 'me';
       mappedStatus = 'open';
     } else if (activeAssigneeTab.value === 'unassigned') {
-      mappedAssigneeType = 'all';
+      mappedAssigneeType = props.teamId ? 'unassigned' : 'all';
       mappedStatus = 'pending';
     } else if (activeAssigneeTab.value === 'all') {
       mappedAssigneeType = 'me';
@@ -765,6 +780,19 @@ function getTabFilters(tabKey, page = 1) {
   }
 
   if (tabKey === 'unassigned') {
+    if (props.teamId) {
+      return {
+        inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+        assigneeType: 'unassigned',
+        status: 'pending',
+        sortBy: activeSortBy.value,
+        page,
+        labels: props.label ? [props.label] : undefined,
+        teamId: props.teamId || undefined,
+        conversationType: props.conversationType || undefined,
+      };
+    }
+
     return {
       inboxId: props.conversationInbox ? props.conversationInbox : undefined,
       assigneeType: 'all',
@@ -969,6 +997,9 @@ async function fetchTab(tabKey, { append = false } = {}) {
     const rows =
       tabKey === 'unassigned'
         ? scopedRows.filter(conversation => {
+            if (props.teamId) {
+              return matchesCurrentContext(conversation) && isPendingTeamWithoutAgent(conversation);
+            }
             return matchesCurrentContext(conversation) && isPendingFromMyTeams(conversation);
           })
         : rawRows.filter(matchesCurrentContext);
@@ -1607,6 +1638,26 @@ watch(
     debugLog('watch:allowedTeamIds', value);
   },
   { immediate: true }
+);
+
+watch(
+  allowedTeamIds,
+  async (newIds, oldIds) => {
+    const oldValue = Array.isArray(oldIds) ? oldIds.join(',') : '';
+    const newValue = Array.isArray(newIds) ? newIds.join(',') : '';
+
+    debugLog('watch:allowedTeamIds:reload', { oldIds, newIds });
+
+    if (oldValue === newValue) return;
+    if (isAdmin.value) return;
+    if (props.teamId) return;
+    if (hasAppliedFiltersOrActiveFolders.value) return;
+    if (!newIds.length) return;
+
+    resetTabState('unassigned');
+    await fetchTab('unassigned');
+  },
+  { immediate: false }
 );
 
 watch(activeTeam, () => resetAndFetchData());
