@@ -279,42 +279,53 @@ function getTeamMembers(team) {
   ];
 }
 
+function normalizeTeamMemberId(member) {
+  if (!member) return 0;
+  if (typeof member === 'number' || typeof member === 'string') return Number(member);
+  // Tenta todos os campos possíveis de ID de usuário no Chatwoot
+  return Number(
+    member.id || 
+    member.user_id || 
+    member.agent_id || 
+    member.account_user_id || 
+    member.user?.id || 0
+  );
+}
+
 const myTeamIds = computed(() => {
-  const user = currentUser.value || {};
-  const userId = Number(user?.id || 0);
+  const userId = currentUserId.value;
   const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
+  
+  if (!userId || !teams.length) return [];
 
-  const idsFromUser = [
-    ...(Array.isArray(user?.teams) ? user.teams : []),
-    ...(Array.isArray(user?.team_ids) ? user.team_ids : []),
-    ...(Array.isArray(user?.agent_teams) ? user.agent_teams : []),
-    ...(Array.isArray(user?.accessible_teams) ? user.accessible_teams : []),
-  ]
-    .map(normalizeTeamId)
-    .filter(Boolean);
-
-  if (idsFromUser.length) {
-    debugLog('myTeamIds:source', 'currentUser', idsFromUser);
-    return [...new Set(idsFromUser)];
-  }
-
-  const idsFromTeams = teams
+  const ids = teams
     .filter(team => {
-      const members = getTeamMembers(team);
-      if (!members.length) return false;
-      return members.some(member => normalizeTeamMemberId(member) === userId);
+      // 1. Verifica em múltiplos campos de arrays de membros
+      const members = [
+        ...(Array.isArray(team.agents) ? team.agents : []),
+        ...(Array.isArray(team.users) ? team.users : []),
+        ...(Array.isArray(team.members) ? team.members : []),
+        ...(Array.isArray(team.account_users) ? team.account_users : [])
+      ];
+
+      // 2. Se o array estiver vazio, tenta verificar IDs puros (algumas APIs retornam só IDs)
+      const memberIds = [
+        ...(Array.isArray(team.agent_ids) ? team.agent_ids : []),
+        ...(Array.isArray(team.user_ids) ? team.user_ids : [])
+      ];
+
+      const hasUserInMembers = members.some(m => normalizeTeamMemberId(m) === userId);
+      const hasUserInIds = memberIds.some(id => Number(id) === userId);
+
+      return hasUserInMembers || hasUserInIds;
     })
-    .map(team => Number(team.id))
-    .filter(Boolean);
+    .map(team => Number(team.id));
 
-  if (idsFromTeams.length) {
-    debugLog('myTeamIds:source', 'teamsList.members', idsFromTeams);
-    return [...new Set(idsFromTeams)];
-  }
-
-  debugLog('myTeamIds:source', 'none', []);
-  return [];
+  const uniqueIds = [...new Set(ids)].filter(Boolean);
+  debugLog('myTeamIds:resultado_final', { userId, foundCount: uniqueIds.length, ids: uniqueIds });
+  return uniqueIds;
 });
+
 
 const allowedTeamIds = computed(() => {
   if (props.teamId) return [Number(props.teamId)];
