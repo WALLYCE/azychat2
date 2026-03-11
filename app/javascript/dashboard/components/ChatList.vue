@@ -274,17 +274,47 @@ const myTeamIds = computed(() => {
   const userId = Number(currentUser.value?.id || 0);
   const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
 
-  if (!userId || !teams.length) return [];
+  if (!teams.length) return [];
 
-  const result = teams
+  const explicitTeamIds = teams
     .filter(team => {
       const members = getTeamMembers(team);
+      if (!members.length) return false;
       return members.some(member => normalizeTeamMemberId(member) === userId);
     })
     .map(team => Number(team.id))
     .filter(Boolean);
 
-  return result;
+  if (explicitTeamIds.length) {
+    return [...new Set(explicitTeamIds)];
+  }
+
+  const currentUserTeamIds = [
+    ...(Array.isArray(currentUser.value?.teams) ? currentUser.value.teams : []),
+    ...(Array.isArray(currentUser.value?.team_ids) ? currentUser.value.team_ids : []),
+    ...(Array.isArray(currentUser.value?.agent_teams)
+      ? currentUser.value.agent_teams
+      : []),
+    ...(Array.isArray(currentUser.value?.accessible_teams)
+      ? currentUser.value.accessible_teams
+      : []),
+  ]
+    .map(team => {
+      if (typeof team === 'number' || typeof team === 'string') {
+        return Number(team);
+      }
+      return Number(team?.id ?? team?.team_id ?? team?.value ?? 0);
+    })
+    .filter(Boolean);
+
+  if (currentUserTeamIds.length) {
+    return [...new Set(currentUserTeamIds)];
+  }
+
+  // Fallback importante:
+  // em alguns cenários o endpoint teams/get já retorna apenas os times visíveis
+  // para o agente atual, sem embutir membros. Nesses casos usamos todos os ids.
+  return [...new Set(teams.map(team => Number(team.id)).filter(Boolean))];
 });
 
 const allowedTeamIds = computed(() => {
@@ -1477,6 +1507,7 @@ onMounted(async () => {
 
   debugLog('onMounted:teamsLoaded', {
     currentUserId: currentUserId.value,
+    currentUser: currentUser.value,
     teams: teamsList.value,
     myTeamIds: myTeamIds.value,
     allowedTeamIds: allowedTeamIds.value,
