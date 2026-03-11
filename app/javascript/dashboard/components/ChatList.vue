@@ -291,27 +291,37 @@ const myTeamIds = computed(() => {
 
   const ids = teams
     .filter(team => {
+      // Coleta todos os membros de todas as formas possíveis
       const members = [
-        ...(Array.isArray(team.agents) ? team.agents : []),
-        ...(Array.isArray(team.users) ? team.users : []),
-        ...(Array.isArray(team.members) ? team.members : []),
-        ...(Array.isArray(team.account_users) ? team.account_users : [])
+        ...(team.agents || []),
+        ...(team.users || []),
+        ...(team.members || []),
+        ...(team.account_users || [])
       ];
 
-      const memberIds = [
-        ...(Array.isArray(team.agent_ids) ? team.agent_ids : []),
-        ...(Array.isArray(team.user_ids) ? team.user_ids : [])
-      ];
+      // Debug interno para um dos times para entendermos a estrutura
+      if (team === teams) {
+        debugLog('myTeamIds:exemplo_estrutura_time', {
+          teamId: team.id,
+          memberSample: members,
+          userIdToMatch: userId
+        });
+      }
 
-      const hasUserInMembers = members.some(m => normalizeTeamMemberId(m) === userId);
-      const hasUserInIds = memberIds.some(id => Number(id) === userId);
-
-      return hasUserInMembers || hasUserInIds;
+      // Verifica se o seu ID (18) está em algum lugar desse time
+      return members.some(m => {
+        const mId = Number(m?.id || m?.user_id || m?.agent_id || m?.account_user_id || m);
+        return mId === userId;
+      }) || (team.agent_ids || []).map(Number).includes(userId);
     })
     .map(team => Number(team.id));
 
-  return [...new Set(ids)].filter(Boolean);
+  const result = [...new Set(ids)].filter(Boolean);
+  debugLog('myTeamIds:resultado', result);
+  return result;
 });
+
+
 const allowedTeamIds = computed(() => {
   if (props.teamId) return [Number(props.teamId)];
   return myTeamIds.value;
