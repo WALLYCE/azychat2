@@ -233,17 +233,23 @@ const actions = {
     commit(types.ASSIGN_AGENT, { conversationId, assignee });
   },
 
- assignTeam: async ({ dispatch }, { conversationId, teamId }) => {
+assignTeam: async ({ dispatch }, { conversationId, teamId }) => {
     try {
       const response = await ConversationApi.assignTeam({
         conversationId,
         teamId,
-        status: 'pending', // <--- Isso força o status para pendente no banco de dados
+        status: 'pending',   // Força a conversa para a aba Pendentes
+        assigneeId: null,    // Remove o agente atual (deixa sem dono)
       });
+      
+      // Atualiza o time no front-end
       dispatch('setCurrentChatTeam', { team: response.data, conversationId });
       
-      // Opcional: Se quiser garantir que o status reflita no front na hora sem esperar o socket
-      dispatch('toggleStatus', { conversationId, status: 'pending' });
+      // Garante que o front-end entenda que agora não há mais um agente
+      dispatch('setCurrentChatAssignee', {
+        conversationId,
+        assignee: null,
+      });
     } catch (error) {
       // Handle error
     }
