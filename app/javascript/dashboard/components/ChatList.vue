@@ -284,39 +284,18 @@ function getTeamMembers(team) {
 }
 
 const myTeamIds = computed(() => {
+  // Ignoramos o currentUser porque já vimos que ele não traz os times
   const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
-  const userId = currentUserId.value; // Seu ID é 18
+  
+  // Se a lista de times da eTelecom carregou (os 5 times do log)
+  if (teams.length > 0) {
+    const ids = teams.map(t => Number(t.id)).filter(Boolean);
+    debugLog('myTeamIds:solucao_contingencia_etelecom', ids);
+    return ids;
+  }
 
-  // Filtra a lista global de times para pegar só os que você é membro
-  const ids = teams
-    .filter(team => {
-      // Coleta todos os membros possíveis do objeto do time
-      const members = [
-        ...(team.agents || []),
-        ...(team.users || []),
-        ...(team.account_users || []),
-        ...(team.members || [])
-      ];
-
-      // Verifica se o seu ID (18) está na lista de membros ou no array de IDs
-      const isMember = members.some(m => {
-        const mId = Number(m?.id || m?.user_id || m?.agent_id || m);
-        return mId === userId;
-      });
-
-      // Algumas versões usam apenas um array de IDs simples
-      const isInIds = (team.agent_ids || []).map(Number).includes(userId);
-
-      return isMember || isInIds;
-    })
-    .map(team => Number(team.id));
-
-  const result = [...new Set(ids)].filter(Boolean);
-  debugLog('myTeamIds:filtrado_por_membro_real', result);
-  return result;
+  return [];
 });
-
-
 const allowedTeamIds = computed(() => {
   if (props.teamId) return [Number(props.teamId)];
   return myTeamIds.value;
