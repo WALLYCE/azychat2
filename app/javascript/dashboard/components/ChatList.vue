@@ -253,10 +253,19 @@ const isAdmin = computed(() => {
 
 const currentUserId = computed(() => Number(currentUser.value?.id || 0));
 
+function normalizeTeamId(item) {
+  if (typeof item === 'number' || typeof item === 'string') {
+    return Number(item);
+  }
+
+  return Number(item?.id ?? item?.team_id ?? item?.value ?? 0);
+}
+
 function normalizeTeamMemberId(member) {
   if (typeof member === 'number' || typeof member === 'string') {
     return Number(member);
   }
+
   return Number(member?.id ?? member?.user_id ?? member?.agent_id ?? 0);
 }
 
@@ -271,12 +280,25 @@ function getTeamMembers(team) {
 }
 
 const myTeamIds = computed(() => {
-  const userId = Number(currentUser.value?.id || 0);
+  const user = currentUser.value || {};
+  const userId = Number(user?.id || 0);
   const teams = Array.isArray(teamsList.value) ? teamsList.value : [];
 
-  if (!teams.length) return [];
+  const idsFromUser = [
+    ...(Array.isArray(user?.teams) ? user.teams : []),
+    ...(Array.isArray(user?.team_ids) ? user.team_ids : []),
+    ...(Array.isArray(user?.agent_teams) ? user.agent_teams : []),
+    ...(Array.isArray(user?.accessible_teams) ? user.accessible_teams : []),
+  ]
+    .map(normalizeTeamId)
+    .filter(Boolean);
 
-  const explicitTeamIds = teams
+  if (idsFromUser.length) {
+    debugLog('myTeamIds:source', 'currentUser', idsFromUser);
+    return [...new Set(idsFromUser)];
+  }
+
+  const idsFromTeams = teams
     .filter(team => {
       const members = getTeamMembers(team);
       if (!members.length) return false;
@@ -285,35 +307,12 @@ const myTeamIds = computed(() => {
     .map(team => Number(team.id))
     .filter(Boolean);
 
-  if (explicitTeamIds.length) {
-    debugLog('myTeamIds:source', 'teams.members');
-    return [...new Set(explicitTeamIds)];
+  if (idsFromTeams.length) {
+    debugLog('myTeamIds:source', 'teamsList.members', idsFromTeams);
+    return [...new Set(idsFromTeams)];
   }
 
-  const currentUserTeamIds = [
-    ...(Array.isArray(currentUser.value?.teams) ? currentUser.value.teams : []),
-    ...(Array.isArray(currentUser.value?.team_ids) ? currentUser.value.team_ids : []),
-    ...(Array.isArray(currentUser.value?.agent_teams)
-      ? currentUser.value.agent_teams
-      : []),
-    ...(Array.isArray(currentUser.value?.accessible_teams)
-      ? currentUser.value.accessible_teams
-      : []),
-  ]
-    .map(team => {
-      if (typeof team === 'number' || typeof team === 'string') {
-        return Number(team);
-      }
-      return Number(team?.id ?? team?.team_id ?? team?.value ?? 0);
-    })
-    .filter(Boolean);
-
-  if (currentUserTeamIds.length) {
-    debugLog('myTeamIds:source', 'currentUser');
-    return [...new Set(currentUserTeamIds)];
-  }
-
-  debugLog('myTeamIds:source', 'none');
+  debugLog('myTeamIds:source', 'none', []);
   return [];
 });
 
@@ -356,8 +355,8 @@ function isPendingTeamWithoutAgent(conversation) {
   return (
     conversation.status === 'pending' &&
     !assigneeId &&
-    isConversationInTeamScope(conversation) &&
-    teamId > 0
+    teamId > 0 &&
+    isConversationInTeamScope(conversation)
   );
 }
 
@@ -597,7 +596,7 @@ const conversationFilters = computed(() => {
   }
 
   return {
-    inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+    inboxId: props.conversationInbox || undefined,
     assigneeType: mappedAssigneeType,
     status: mappedStatus,
     sortBy: activeSortBy.value,
@@ -765,55 +764,38 @@ function emitConversationLoaded() {
   emit('conversationLoad');
 }
 
-function getTabFilters(tabKey, page = 1) {
+function getTabFilters(tabKey, page = 1, teamIdOverride = undefined) {
+  const common = {
+    inboxId: props.conversationInbox || undefined,
+    sortBy: activeSortBy.value,
+    page,
+    labels: props.label ? [props.label] : undefined,
+    conversationType: props.conversationType || undefined,
+  };
+
   if (tabKey === 'me') {
     return {
-      inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+      ...common,
       assigneeType: 'me',
       status: 'open',
-      sortBy: activeSortBy.value,
-      page,
-      labels: props.label ? [props.label] : undefined,
       teamId: undefined,
-      conversationType: props.conversationType || undefined,
     };
   }
 
   if (tabKey === 'unassigned') {
-    if (props.teamId) {
-      return {
-        inboxId: props.conversationInbox ? props.conversationInbox : undefined,
-        assigneeType: 'unassigned',
-        status: 'pending',
-        sortBy: activeSortBy.value,
-        page,
-        labels: props.label ? [props.label] : undefined,
-        teamId: props.teamId || undefined,
-        conversationType: props.conversationType || undefined,
-      };
-    }
-
     return {
-      inboxId: props.conversationInbox ? props.conversationInbox : undefined,
-      assigneeType: 'all',
+      ...common,
+      assigneeType: props.teamId || teamIdOverride ? 'unassigned' : 'all',
       status: 'pending',
-      sortBy: activeSortBy.value,
-      page,
-      labels: props.label ? [props.label] : undefined,
-      teamId: undefined,
-      conversationType: props.conversationType || undefined,
+      teamId: teamIdOverride ?? (props.teamId || undefined),
     };
   }
 
   return {
-    inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+    ...common,
     assigneeType: 'me',
     status: 'resolved',
-    sortBy: activeSortBy.value,
-    page,
-    labels: props.label ? [props.label] : undefined,
     teamId: props.teamId || undefined,
-    conversationType: props.conversationType || undefined,
   };
 }
 
@@ -836,91 +818,81 @@ function dedupeConversations(items) {
 }
 
 async function fetchPendingForAllowedTeams(startPage = 1) {
-  const collectedRows = [];
-  const seenIds = new Set();
-  let page = startPage;
-  let hasEndReached = false;
-
-  debugLog('fetchPendingForAllowedTeams:start', {
-    startPage,
-    allowedTeamIds: allowedTeamIds.value,
-    propsTeamId: props.teamId,
-    conversationInbox: props.conversationInbox,
-    label: props.label,
-    conversationType: props.conversationType,
-  });
-
-  while (collectedRows.length < TAB_PAGE_SIZE && !hasEndReached) {
-    const filters = getTabFilters('unassigned', page);
-    debugLog('fetchPendingForAllowedTeams:request', { page, filters });
-
-    const response = await store.dispatch(
-      'fetchConversationsByFilters',
-      filters
-    );
-
-    const rawRows = normalizeConversationRows(response);
-
-    debugLog(
-      'fetchPendingForAllowedTeams:rawRows',
-      rawRows.map(conversation => ({
-        id: conversation.id,
-        status: conversation.status,
-        assignee_id: conversation.assignee_id,
-        team_id: conversation.team_id,
-        meta_team_id: conversation?.meta?.team?.id,
-        resolvedTeamId: getConversationTeamId(conversation),
-      }))
-    );
-
-    if (!rawRows.length || rawRows.length < TAB_PAGE_SIZE) {
-      hasEndReached = true;
-    }
-
-    const filteredRows = rawRows.filter(conversation => {
-      const matchesContext = matchesCurrentContext(conversation);
-      const pendingFromMyTeams = isPendingFromMyTeams(conversation);
-
-      debugLog('fetchPendingForAllowedTeams:check', {
-        id: conversation.id,
-        status: conversation.status,
-        assigneeId: getConversationAssigneeId(conversation),
-        teamId: getConversationTeamId(conversation),
-        allowedTeamIds: allowedTeamIds.value,
-        matchesContext,
-        pendingFromMyTeams,
-      });
-
-      return matchesContext && pendingFromMyTeams;
-    });
-
-    filteredRows.forEach(conversation => {
-      if (!seenIds.has(conversation.id)) {
-        seenIds.add(conversation.id);
-        collectedRows.push(conversation);
-      }
-    });
-
-    debugLog('fetchPendingForAllowedTeams:pageResult', {
-      page,
-      filteredCount: filteredRows.length,
-      collectedCount: collectedRows.length,
-      hasEndReached,
-    });
-
-    page += 1;
+  if (!allowedTeamIds.value.length) {
+    debugLog('fetchPendingForAllowedTeams:vazio');
+    return {
+      rows: [],
+      hasEndReached: true,
+      lastScannedPage: startPage,
+    };
   }
 
+  debugLog('fetchPendingForAllowedTeams:buscando_por_time', {
+    teamIds: allowedTeamIds.value,
+    page: startPage,
+  });
+
+  const responses = await Promise.all(
+    allowedTeamIds.value.map(teamId =>
+      store.dispatch(
+        'fetchConversationsByFilters',
+        getTabFilters('unassigned', startPage, teamId)
+      )
+    )
+  );
+
+  const rawRows = responses.flatMap(response => normalizeConversationRows(response));
+
+  debugLog(
+    'fetchPendingForAllowedTeams:rawRows',
+    rawRows.map(conversation => ({
+      id: conversation.id,
+      status: conversation.status,
+      assignee_id: conversation.assignee_id,
+      team_id: conversation.team_id,
+      meta_team_id: conversation?.meta?.team?.id,
+      resolvedTeamId: getConversationTeamId(conversation),
+    }))
+  );
+
+  const seenIds = new Set();
+  const rows = rawRows.filter(conversation => {
+    const matchesContext = matchesCurrentContext(conversation);
+    const isTeamScope = isConversationInTeamScope(conversation);
+
+    debugLog('fetchPendingForAllowedTeams:check', {
+      id: conversation.id,
+      status: conversation.status,
+      assigneeId: getConversationAssigneeId(conversation),
+      teamId: getConversationTeamId(conversation),
+      allowedTeamIds: allowedTeamIds.value,
+      matchesContext,
+      isTeamScope,
+    });
+
+    if (!matchesContext) return false;
+    if (!isTeamScope) return false;
+    if (seenIds.has(conversation.id)) return false;
+
+    seenIds.add(conversation.id);
+    return true;
+  });
+
+  const hasEndReached = responses.every(response => {
+    const pageRows = normalizeConversationRows(response);
+    return pageRows.length < TAB_PAGE_SIZE;
+  });
+
   debugLog('fetchPendingForAllowedTeams:done', {
-    collectedIds: collectedRows.map(item => item.id),
+    collectedIds: rows.map(item => item.id),
     hasEndReached,
-    lastScannedPage: page - 1,
+    lastScannedPage: startPage,
   });
 
   return {
-    rows: sortConversationsByLastActivity(collectedRows),
+    rows: sortConversationsByLastActivity(rows),
     hasEndReached,
-    lastScannedPage: page - 1,
+    lastScannedPage: startPage,
   };
 }
 
@@ -948,11 +920,9 @@ async function fetchTab(tabKey, { append = false } = {}) {
 
       mirrorRowsToStore(rows);
 
-      if (append) {
-        tab.items = dedupeConversations([...tab.items, ...rows]);
-      } else {
-        tab.items = rows;
-      }
+      tab.items = append
+        ? dedupeConversations([...tab.items, ...rows])
+        : rows;
 
       tab.page = lastScannedPage;
       tab.hasEndReached = hasEndReached;
@@ -967,6 +937,7 @@ async function fetchTab(tabKey, { append = false } = {}) {
         hasEndReached,
         lastScannedPage,
       });
+
       return;
     }
 
@@ -988,32 +959,23 @@ async function fetchTab(tabKey, { append = false } = {}) {
       }))
     );
 
-    let scopedRows = rawRows;
+    const rows = rawRows.filter(conversation => {
+      if (!matchesCurrentContext(conversation)) return false;
 
-    if (tabKey === 'unassigned') {
-      scopedRows = rawRows.filter(isConversationInTeamScope);
-    }
+      if (tabKey === 'unassigned') {
+        return isPendingTeamWithoutAgent(conversation);
+      }
 
-    const rows =
-      tabKey === 'unassigned'
-        ? scopedRows.filter(conversation => {
-            if (props.teamId) {
-              return matchesCurrentContext(conversation) && isPendingTeamWithoutAgent(conversation);
-            }
-            return matchesCurrentContext(conversation) && isPendingFromMyTeams(conversation);
-          })
-        : rawRows.filter(matchesCurrentContext);
+      return true;
+    });
 
     mirrorRowsToStore(rows);
 
-    if (append) {
-      tab.items = dedupeConversations([...tab.items, ...rows]);
-      tab.page = nextPage;
-    } else {
-      tab.items = rows;
-      tab.page = 1;
-    }
+    tab.items = append
+      ? dedupeConversations([...tab.items, ...rows])
+      : rows;
 
+    tab.page = nextPage;
     tab.hasEndReached = rawRows.length < TAB_PAGE_SIZE;
     tab.initialized = true;
 
@@ -1024,7 +986,7 @@ async function fetchTab(tabKey, { append = false } = {}) {
       page: tab.page,
     });
   } catch (error) {
-    debugLog('fetchTab:error', error);
+    console.error('Erro no fetchTab:', error);
   } finally {
     tab.loading = false;
   }
@@ -1626,8 +1588,20 @@ provide('deleteConversation', handleDelete);
 
 watch(
   myTeamIds,
-  value => {
-    debugLog('watch:myTeamIds', value);
+  async (newIds, oldIds) => {
+    const oldValue = Array.isArray(oldIds) ? oldIds.join(',') : '';
+    const newValue = Array.isArray(newIds) ? newIds.join(',') : '';
+
+    debugLog('watch:myTeamIds', newIds);
+
+    if (!newIds.length) return;
+    if (oldValue === newValue) return;
+    if (isAdmin.value) return;
+    if (props.teamId) return;
+    if (hasAppliedFiltersOrActiveFolders.value) return;
+
+    resetTabState('unassigned');
+    await fetchTab('unassigned');
   },
   { immediate: true }
 );
@@ -1638,26 +1612,6 @@ watch(
     debugLog('watch:allowedTeamIds', value);
   },
   { immediate: true }
-);
-
-watch(
-  allowedTeamIds,
-  async (newIds, oldIds) => {
-    const oldValue = Array.isArray(oldIds) ? oldIds.join(',') : '';
-    const newValue = Array.isArray(newIds) ? newIds.join(',') : '';
-
-    debugLog('watch:allowedTeamIds:reload', { oldIds, newIds });
-
-    if (oldValue === newValue) return;
-    if (isAdmin.value) return;
-    if (props.teamId) return;
-    if (hasAppliedFiltersOrActiveFolders.value) return;
-    if (!newIds.length) return;
-
-    resetTabState('unassigned');
-    await fetchTab('unassigned');
-  },
-  { immediate: false }
 );
 
 watch(activeTeam, () => resetAndFetchData());
