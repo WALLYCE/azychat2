@@ -233,25 +233,31 @@ const actions = {
     commit(types.ASSIGN_AGENT, { conversationId, assignee });
   },
 
-assignTeam: async ({ dispatch }, { conversationId, teamId }) => {
+    assignTeam: async ({ dispatch }, { conversationId, teamId }) => {
     try {
+      // 1. Torna Pendente
+      await dispatch('toggleStatus', { 
+        conversationId, 
+        status: 'pending' 
+      });
+
+      // 2. Tira o Agente (deixa sem dono)
+      await dispatch('assignAgent', {
+        conversationId,
+        agentId: 0, 
+      });
+
+      // 3. Muda o Time
       const response = await ConversationApi.assignTeam({
         conversationId,
         teamId,
-        status: 'pending',   // Força a conversa para a aba Pendentes
-        assigneeId: null,    // Remove o agente atual (deixa sem dono)
       });
       
-      // Atualiza o time no front-end
+      // Atualiza o time na tela
       dispatch('setCurrentChatTeam', { team: response.data, conversationId });
-      
-      // Garante que o front-end entenda que agora não há mais um agente
-      dispatch('setCurrentChatAssignee', {
-        conversationId,
-        assignee: null,
-      });
+
     } catch (error) {
-      // Handle error
+      console.error('Erro na transferência:', error);
     }
   },
 
