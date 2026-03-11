@@ -68,6 +68,13 @@ import { CONVERSATION_EVENTS } from '../helper/AnalyticsHelper/events';
 import { ASSIGNEE_TYPE_TAB_PERMISSIONS } from 'dashboard/constants/permissions.js';
 
 const TAB_PAGE_SIZE = 25;
+const DEBUG_ALL_CONVERSATIONS = true;
+
+function debugLog(...args) {
+  if (DEBUG_ALL_CONVERSATIONS) {
+    console.log('[ConversationList DEBUG]', ...args);
+  }
+}
 
 const props = defineProps({
   conversationInbox: {
@@ -269,13 +276,15 @@ const myTeamIds = computed(() => {
 
   if (!userId || !teams.length) return [];
 
-  return teams
+  const result = teams
     .filter(team => {
       const members = getTeamMembers(team);
       return members.some(member => normalizeTeamMemberId(member) === userId);
     })
     .map(team => Number(team.id))
     .filter(Boolean);
+
+  return result;
 });
 
 const allowedTeamIds = computed(() => {
@@ -288,7 +297,12 @@ function getConversationAssigneeId(conversation) {
 }
 
 function getConversationTeamId(conversation) {
-  return Number(conversation.team_id ?? conversation.meta?.team?.id ?? 0);
+  return Number(
+    conversation?.team_id ??
+      conversation?.meta?.team?.id ??
+      conversation?.meta?.additional_attributes?.team_id ??
+      0
+  );
 }
 
 function isConversationInTeamScope(conversation) {
@@ -420,6 +434,13 @@ function syncConversationByPayload(payload) {
 
   if (!conversation?.id) return;
 
+  debugLog('syncConversationByPayload', {
+    id: conversation.id,
+    status: conversation.status,
+    assigneeId: getConversationAssigneeId(conversation),
+    teamId: getConversationTeamId(conversation),
+  });
+
   syncConversationToTabs(conversation);
 }
 
@@ -522,7 +543,7 @@ const conversationFilters = computed(() => {
       mappedAssigneeType = 'me';
       mappedStatus = 'open';
     } else if (activeAssigneeTab.value === 'unassigned') {
-      mappedAssigneeType = 'unassigned';
+      mappedAssigneeType = 'all';
       mappedStatus = 'pending';
     } else if (activeAssigneeTab.value === 'all') {
       mappedAssigneeType = 'me';
@@ -699,7 +720,7 @@ function emitConversationLoaded() {
   emit('conversationLoad');
 }
 
-function getTabFilters(tabKey, page = 1, teamIdOverride = undefined) {
+function getTabFilters(tabKey, page = 1) {
   if (tabKey === 'me') {
     return {
       inboxId: props.conversationInbox ? props.conversationInbox : undefined,
@@ -716,11 +737,12 @@ function getTabFilters(tabKey, page = 1, teamIdOverride = undefined) {
   if (tabKey === 'unassigned') {
     return {
       inboxId: props.conversationInbox ? props.conversationInbox : undefined,
+      assigneeType: 'all',
       status: 'pending',
       sortBy: activeSortBy.value,
       page,
       labels: props.label ? [props.label] : undefined,
-      teamId: teamIdOverride ?? (props.teamId || undefined),
+      teamId: undefined,
       conversationType: props.conversationType || undefined,
     };
   }
@@ -755,43 +777,92 @@ function dedupeConversations(items) {
   });
 }
 
-async function fetchPendingForAllowedTeams(page) {
-  const teamIds = props.teamId ? [Number(props.teamId)] : allowedTeamIds.value;
+async function fetchPendingForAllowedTeams(startPage = 1) {
+  const collectedRows = [];
+  const seenIds = new Set();
+  let page = startPage;
+  let hasEndReached = false;
 
-  if (!teamIds.length) {
-    return {
-      rows: [],
-      hasEndReached: true,
-    };
+  debugLog('fetchPendingForAllowedTeams:start', {
+    startPage,
+    allowedTeamIds: allowedTeamIds.value,
+    propsTeamId: props.teamId,
+    conversationInbox: props.conversationInbox,
+    label: props.label,
+    conversationType: props.conversationType,
+  });
+
+  while (collectedRows.length < TAB_PAGE_SIZE && !hasEndReached) {
+    const filters = getTabFilters('unassigned', page);
+    debugLog('fetchPendingForAllowedTeams:request', { page, filters });
+
+    const response = await store.dispatch(
+      'fetchConversationsByFilters',
+      filters
+    );
+
+    const rawRows = normalizeConversationRows(response);
+
+    debugLog(
+      'fetchPendingForAllowedTeams:rawRows',
+      rawRows.map(conversation => ({
+        id: conversation.id,
+        status: conversation.status,
+        assignee_id: conversation.assignee_id,
+        team_id: conversation.team_id,
+        meta_team_id: conversation?.meta?.team?.id,
+        resolvedTeamId: getConversationTeamId(conversation),
+      }))
+    );
+
+    if (!rawRows.length || rawRows.length < TAB_PAGE_SIZE) {
+      hasEndReached = true;
+    }
+
+    const filteredRows = rawRows.filter(conversation => {
+      const matchesContext = matchesCurrentContext(conversation);
+      const pendingFromMyTeams = isPendingFromMyTeams(conversation);
+
+      debugLog('fetchPendingForAllowedTeams:check', {
+        id: conversation.id,
+        status: conversation.status,
+        assigneeId: getConversationAssigneeId(conversation),
+        teamId: getConversationTeamId(conversation),
+        allowedTeamIds: allowedTeamIds.value,
+        matchesContext,
+        pendingFromMyTeams,
+      });
+
+      return matchesContext && pendingFromMyTeams;
+    });
+
+    filteredRows.forEach(conversation => {
+      if (!seenIds.has(conversation.id)) {
+        seenIds.add(conversation.id);
+        collectedRows.push(conversation);
+      }
+    });
+
+    debugLog('fetchPendingForAllowedTeams:pageResult', {
+      page,
+      filteredCount: filteredRows.length,
+      collectedCount: collectedRows.length,
+      hasEndReached,
+    });
+
+    page += 1;
   }
 
-  const responses = await Promise.all(
-    teamIds.map(teamId =>
-      store.dispatch(
-        'fetchConversationsByFilters',
-        getTabFilters('unassigned', page, teamId)
-      )
-    )
-  );
-
-  const mergedRows = responses.flatMap(response =>
-    normalizeConversationRows(response)
-  );
-
-  const rows = dedupeConversations(
-    mergedRows.filter(conversation => {
-      return matchesCurrentContext(conversation) && isPendingFromMyTeams(conversation);
-    })
-  );
-
-  const hasEndReached = responses.every(response => {
-    const normalized = normalizeConversationRows(response);
-    return normalized.length < TAB_PAGE_SIZE;
+  debugLog('fetchPendingForAllowedTeams:done', {
+    collectedIds: collectedRows.map(item => item.id),
+    hasEndReached,
+    lastScannedPage: page - 1,
   });
 
   return {
-    rows: sortConversationsByLastActivity(rows),
+    rows: sortConversationsByLastActivity(collectedRows),
     hasEndReached,
+    lastScannedPage: page - 1,
   };
 }
 
@@ -804,27 +875,60 @@ async function fetchTab(tabKey, { append = false } = {}) {
   try {
     const nextPage = append ? tab.page + 1 : 1;
 
+    debugLog('fetchTab:start', {
+      tabKey,
+      append,
+      nextPage,
+      isAdmin: isAdmin.value,
+      propsTeamId: props.teamId,
+      allowedTeamIds: allowedTeamIds.value,
+    });
+
     if (tabKey === 'unassigned' && !isAdmin.value && !props.teamId) {
-      const { rows, hasEndReached } = await fetchPendingForAllowedTeams(nextPage);
+      const { rows, hasEndReached, lastScannedPage } =
+        await fetchPendingForAllowedTeams(nextPage);
 
       mirrorRowsToStore(rows);
 
       if (append) {
         tab.items = dedupeConversations([...tab.items, ...rows]);
-        tab.page = nextPage;
       } else {
         tab.items = rows;
-        tab.page = 1;
       }
 
+      tab.page = lastScannedPage;
       tab.hasEndReached = hasEndReached;
       tab.initialized = true;
+
+      debugLog('fetchTab:unassignedDone', {
+        rows: rows.map(item => ({
+          id: item.id,
+          status: item.status,
+          teamId: getConversationTeamId(item),
+        })),
+        hasEndReached,
+        lastScannedPage,
+      });
       return;
     }
 
     const filters = getTabFilters(tabKey, nextPage);
+    debugLog('fetchTab:request', { tabKey, filters });
+
     const responseData = await store.dispatch('fetchConversationsByFilters', filters);
     const rawRows = normalizeConversationRows(responseData);
+
+    debugLog(
+      'fetchTab:rawRows',
+      rawRows.map(conversation => ({
+        id: conversation.id,
+        status: conversation.status,
+        assignee_id: conversation.assignee_id,
+        team_id: conversation.team_id,
+        meta_team_id: conversation?.meta?.team?.id,
+        resolvedTeamId: getConversationTeamId(conversation),
+      }))
+    );
 
     let scopedRows = rawRows;
 
@@ -851,8 +955,15 @@ async function fetchTab(tabKey, { append = false } = {}) {
 
     tab.hasEndReached = rawRows.length < TAB_PAGE_SIZE;
     tab.initialized = true;
+
+    debugLog('fetchTab:done', {
+      tabKey,
+      resultIds: rows.map(item => item.id),
+      hasEndReached: tab.hasEndReached,
+      page: tab.page,
+    });
   } catch (error) {
-    // Ignore local tab fetch error
+    debugLog('fetchTab:error', error);
   } finally {
     tab.loading = false;
   }
@@ -1039,6 +1150,13 @@ async function resetAndFetchData() {
   appliedFilter.value = [];
   resetBulkActions();
 
+  debugLog('resetAndFetchData', {
+    hasAppliedFiltersOrActiveFolders: hasAppliedFiltersOrActiveFolders.value,
+    isAdmin: isAdmin.value,
+    activeAssigneeTab: activeAssigneeTab.value,
+    allowedTeamIds: allowedTeamIds.value,
+  });
+
   if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
     resetTabState();
     await prefetchAllTabs();
@@ -1065,6 +1183,13 @@ async function resetAndFetchData() {
 async function loadMoreConversations() {
   if (!hasAppliedFiltersOrActiveFolders.value && !isAdmin.value) {
     const currentTab = tabState[activeAssigneeTab.value];
+
+    debugLog('loadMoreConversations', {
+      activeAssigneeTab: activeAssigneeTab.value,
+      currentPage: currentTab.page,
+      hasEndReached: currentTab.hasEndReached,
+      loading: currentTab.loading,
+    });
 
     if (currentTab.loading || currentTab.hasEndReached) {
       return;
@@ -1095,6 +1220,12 @@ const intersectionObserverOptions = computed(() => ({
 
 function updateAssigneeTab(selectedTab) {
   if (activeAssigneeTab.value === selectedTab) return;
+
+  debugLog('updateAssigneeTab', {
+    from: activeAssigneeTab.value,
+    to: selectedTab,
+    allowedTeamIds: allowedTeamIds.value,
+  });
 
   resetBulkActions();
   emitter.emit('clearSearchInput');
@@ -1344,6 +1475,14 @@ onMounted(async () => {
     // ignora, segue com a tela
   }
 
+  debugLog('onMounted:teamsLoaded', {
+    currentUserId: currentUserId.value,
+    teams: teamsList.value,
+    myTeamIds: myTeamIds.value,
+    allowedTeamIds: allowedTeamIds.value,
+    propsTeamId: props.teamId,
+  });
+
   setFiltersFromUISettings();
   store.dispatch('setChatStatusFilter', activeStatus.value);
   store.dispatch('setChatSortFilter', activeSortBy.value);
@@ -1423,6 +1562,22 @@ provide('assignPriority', assignPriority);
 provide('isConversationSelected', isConversationSelected);
 provide('deleteConversation', handleDelete);
 
+watch(
+  myTeamIds,
+  value => {
+    debugLog('watch:myTeamIds', value);
+  },
+  { immediate: true }
+);
+
+watch(
+  allowedTeamIds,
+  value => {
+    debugLog('watch:allowedTeamIds', value);
+  },
+  { immediate: true }
+);
+
 watch(activeTeam, () => resetAndFetchData());
 
 watch(
@@ -1451,12 +1606,22 @@ watch(
   conversationList,
   value => {
     chatsOnView.value = value;
+    debugLog(
+      'watch:conversationList',
+      value.map(item => ({
+        id: item.id,
+        status: item.status,
+        assigneeId: getConversationAssigneeId(item),
+        teamId: getConversationTeamId(item),
+      }))
+    );
   },
   { immediate: true }
 );
 
 watch(conversationFilters, (newVal, oldVal) => {
   if (newVal !== oldVal) {
+    debugLog('watch:conversationFilters', { oldVal, newVal });
     store.dispatch('updateChatListFilters', newVal);
   }
 });
