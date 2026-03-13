@@ -384,7 +384,7 @@ function belongsToTab(conversation, tabKey) {
   const assigneeId = getConversationAssigneeId(conversation);
 
   if (tabKey === 'me') {
-    return conversation.status === 'open' && assigneeId === currentUserId.value;
+    return ['open', 'pending'].includes(conversation.status) && assigneeId === currentUserId.value;
   }
 
   if (tabKey === 'unassigned') {
@@ -565,7 +565,7 @@ const conversationFilters = computed(() => {
   if (!isAdmin.value) {
     if (activeAssigneeTab.value === 'me') {
       mappedAssigneeType = 'me';
-      mappedStatus = 'open';
+      mappedStatus = 'all'; // MUDANÇA AQUI
     } else if (activeAssigneeTab.value === 'unassigned') {
       mappedAssigneeType = props.teamId ? 'unassigned' : 'all';
       mappedStatus = 'pending';
@@ -757,7 +757,7 @@ function getTabFilters(tabKey, page = 1, teamIdOverride = undefined) {
     return {
       ...common,
       assigneeType: 'me',
-      status: 'open',
+      status: 'all',
       teamId: undefined,
     };
   }
@@ -939,6 +939,7 @@ async function fetchTab(tabKey, { append = false } = {}) {
       }))
     );
 
+// Dentro do bloco try da função fetchTab...
     const rows = rawRows.filter(conversation => {
       if (!matchesCurrentContext(conversation)) return false;
 
@@ -946,9 +947,13 @@ async function fetchTab(tabKey, { append = false } = {}) {
         return isPendingTeamWithoutAgent(conversation);
       }
 
+      // MUDANÇA AQUI: Bloqueia as 'resolved' e outras, aceitando só 'open' e 'pending'
+      if (tabKey === 'me') {
+        return ['open', 'pending'].includes(conversation.status);
+      }
+
       return true;
     });
-
     mirrorRowsToStore(rows);
 
     tab.items = append
@@ -1236,7 +1241,7 @@ function updateAssigneeTab(selectedTab) {
 
   if (!isAdmin.value) {
     if (selectedTab === 'me') {
-      activeStatus.value = 'open';
+      activeStatus.value = 'all'; // MUDANÇA AQUI
     } else if (selectedTab === 'unassigned') {
       activeStatus.value = 'pending';
     } else if (selectedTab === 'all') {
