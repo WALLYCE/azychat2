@@ -852,6 +852,7 @@ async function fetchPendingForAllowedTeams(startPage = 1) {
 
     if (!matchesContext) return false;
     if (!isTeamScope) return false;
+    if (!isPendingTeamWithoutAgent(conversation)) return false;
     if (seenIds.has(conversation.id)) return false;
 
     seenIds.add(conversation.id);
@@ -947,9 +948,13 @@ async function fetchTab(tabKey, { append = false } = {}) {
         return isPendingTeamWithoutAgent(conversation);
       }
 
-      // MUDANÇA AQUI: Bloqueia as 'resolved' e outras, aceitando só 'open' e 'pending'
       if (tabKey === 'me') {
         return ['open', 'pending'].includes(conversation.status);
+      }
+
+      if (tabKey === 'all') {
+        const assigneeId = getConversationAssigneeId(conversation);
+        return conversation.status === 'resolved' && assigneeId === currentUserId.value;
       }
 
       return true;

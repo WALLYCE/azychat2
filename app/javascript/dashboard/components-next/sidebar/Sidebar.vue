@@ -225,6 +225,7 @@ const newReportRoutes = () => [
 const reportRoutes = computed(() => newReportRoutes());
 
 const menuItems = computed(() => {
+  console.log('[SIDEBAR] isAdmin:', isAdmin.value, 'role:', currentRole.value);
   return [
     ...(isAdmin.value
       ? [

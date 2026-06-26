@@ -102,9 +102,7 @@ const handleWindowBlur = () => {
 const accessibleItems = computed(() => {
   if (!hasChildren.value) return [];
   return props.children.filter(child => {
-    // If a item has no link, it means it's just a subgroup header
-    // So we don't need to check for permissions here, because there's nothing to
-    // access here anyway
+    if (child.children) return child.children.length > 0;
     return child.to && isAllowed(child.to);
   });
 });
@@ -180,9 +178,9 @@ const toggleTrigger = () => {
     !isExpanded.value &&
     !hasActiveChild.value
   ) {
-    // if not already expanded, navigate to the first child
+    // if not already expanded, navigate to the first child (only if it has a route)
     const firstItem = accessibleItems.value[0];
-    router.push(firstItem.to);
+    if (firstItem?.to) router.push(firstItem.to);
   }
   setExpandedItem(props.name);
 };
