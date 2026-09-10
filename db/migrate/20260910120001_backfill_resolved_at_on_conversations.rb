@@ -1,38 +1,28 @@
 class BackfillResolvedAtOnConversations < ActiveRecord::Migration[7.1]
   disable_ddl_transaction!
 
-  # `resolved_at` is populated going forward by the Conversation model. For
-  # conversations that were already resolved before this column existed we
-  # approximate it with `last_activity_at` (falling back to `updated_at`).
-  #
-  # This runs as set-based UPDATEs in id-range batches so it stays fast on large
-  # tables and keeps row locks short. It is idempotent (`resolved_at IS NULL`),
-  # so a previously interrupted run can simply be re-applied.
+  # For conversations that are already resolved we estimate `resolved_at` using the
+  # most recent `conversation_resolved` reporting event. When there is no such event
+  # (older data / events pruned) we fall back to `last_activity_at`, then `updated_at`.
   def up
-    resolved = Conversation.statuses[:resolved]
+    Conversation.resolved.where(resolved_at: nil).find_each(batch_size: 1000) do |conversation|
+      event_end_time = ReportingEvent
+                       .where(conversation_id: conversation.id, name: 'conversation_resolved')
+                       .order(created_at: :desc)
+                       .limit(1)
+                       .pick(:event_end_time)
 
-    min_id = Conversation.where(status: resolved).minimum(:id)
-    max_id = Conversation.where(status: resolved).maximum(:id)
-    return if min_id.nil?
+      timestamp = event_end_time || conversation.last_activity_at || conversation.updated_at
 
-    batch_size = 50_000
-    start_id = min_id
-
-    while start_id <= max_id
-      execute(<<~SQL.squish)
-        UPDATE conversations
-        SET resolved_at = COALESCE(last_activity_at, updated_at)
-        WHERE id >= #{start_id.to_i}
-          AND id < #{start_id.to_i + batch_size}
-          AND status = #{resolved.to_i}
-          AND resolved_at IS NULL
-      SQL
-
-      start_id += batch_size
+      # rubocop:disable Rails/SkipsModelValidations
+      conversation.update_column(:resolved_at, timestamp)
+      # rubocop:enable Rails/SkipsModelValidations
     end
   end
 
   def down
-    execute('UPDATE conversations SET resolved_at = NULL WHERE resolved_at IS NOT NULL')
+    # rubocop:disable Rails/SkipsModelValidations
+    Conversation.where.not(resolved_at: nil).update_all(resolved_at: nil)
+    # rubocop:enable Rails/SkipsModelValidations
   end
 end
