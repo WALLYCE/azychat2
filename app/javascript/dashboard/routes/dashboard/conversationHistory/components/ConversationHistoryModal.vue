@@ -22,6 +22,7 @@ const { t } = useI18n();
 const PAGE_SIZE = 10;
 
 const dialogRef = ref(null);
+const currentAgent = ref(null);
 const conversations = ref([]);
 const page = ref(1);
 const totalCount = ref(0);
@@ -47,8 +48,8 @@ const statusOptions = computed(() => [
 ]);
 
 const title = computed(() =>
-  props.agent
-    ? t('CONVERSATION_HISTORY.MODAL.TITLE', { name: props.agent.name })
+  currentAgent.value
+    ? t('CONVERSATION_HISTORY.MODAL.TITLE', { name: currentAgent.value.name })
     : ''
 );
 
@@ -68,12 +69,12 @@ const formatDate = epoch =>
 const contactName = conversation => conversation?.meta?.sender?.name || '—';
 
 const fetchHistory = async ({ append = false } = {}) => {
-  if (!props.agent) return;
+  if (!currentAgent.value) return;
   isLoading.value = true;
   errorMessage.value = '';
   try {
     const { data } = await ConversationHistoryAPI.getAgentHistory({
-      assigneeId: props.agent.id,
+      assigneeId: currentAgent.value.id,
       filters: filters.value,
       page: page.value,
     });
@@ -123,6 +124,7 @@ const clearFilters = () => {
 const onDialogClose = () => {
   resetFilters();
   resetState();
+  currentAgent.value = null;
 };
 
 const loadMore = async () => {
@@ -139,8 +141,11 @@ const onRowClick = conversation => {
   emit('openTranscript', conversation);
 };
 
-const open = () => {
-  resetAndFetch();
+const open = agent => {
+  currentAgent.value = agent ?? props.agent;
+  resetFilters();
+  resetState();
+  fetchHistory();
   dialogRef.value?.open();
 };
 

@@ -17,14 +17,17 @@ const props = defineProps({
 const { t } = useI18n();
 
 const dialogRef = ref(null);
+const currentConversation = ref(null);
 const messages = ref([]);
 const isLoading = ref(false);
 const hasMoreBefore = ref(false);
 const errorMessage = ref('');
 
 const title = computed(() =>
-  props.conversation
-    ? t('CONVERSATION_HISTORY.TRANSCRIPT.TITLE', { id: props.conversation.id })
+  currentConversation.value
+    ? t('CONVERSATION_HISTORY.TRANSCRIPT.TITLE', {
+        id: currentConversation.value.id,
+      })
     : ''
 );
 
@@ -36,12 +39,12 @@ const sortedMessages = computed(() =>
 );
 
 const fetchMessages = async ({ before } = {}) => {
-  if (!props.conversation) return;
+  if (!currentConversation.value) return;
   isLoading.value = true;
   errorMessage.value = '';
   try {
     const { data } = await ConversationHistoryAPI.getMessages({
-      conversationId: props.conversation.id,
+      conversationId: currentConversation.value.id,
       before,
     });
     const payload = data.payload || [];
@@ -67,14 +70,23 @@ const loadPrevious = () => {
   if (oldest) fetchMessages({ before: oldest.id });
 };
 
-const open = () => {
+const open = conversation => {
+  currentConversation.value = conversation ?? props.conversation;
   messages.value = [];
   hasMoreBefore.value = false;
+  errorMessage.value = '';
   fetchMessages();
   dialogRef.value?.open();
 };
 
 const close = () => dialogRef.value?.close();
+
+const onDialogClose = () => {
+  currentConversation.value = null;
+  messages.value = [];
+  hasMoreBefore.value = false;
+  errorMessage.value = '';
+};
 
 defineExpose({ open, close });
 </script>
@@ -86,6 +98,7 @@ defineExpose({ open, close });
     width="3xl"
     :show-confirm-button="false"
     overflow-y-auto
+    @close="onDialogClose"
   >
     <div class="flex flex-col gap-3">
       <div

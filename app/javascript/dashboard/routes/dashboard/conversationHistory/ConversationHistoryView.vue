@@ -75,12 +75,12 @@ watch(scope, () => {
 
 const openHistory = agent => {
   activeAgent.value = agent;
-  historyModalRef.value?.open();
+  historyModalRef.value?.open(agent);
 };
 
 const openTranscript = conversation => {
   activeConversation.value = conversation;
-  transcriptModalRef.value?.open();
+  transcriptModalRef.value?.open(conversation);
 };
 
 onMounted(() => {
