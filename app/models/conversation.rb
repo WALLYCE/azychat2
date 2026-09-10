@@ -13,6 +13,7 @@
 #  identifier             :string
 #  last_activity_at       :datetime         not null
 #  priority               :integer
+#  resolved_at            :datetime
 #  snoozed_until          :datetime
 #  status                 :integer          default("open"), not null
 #  uuid                   :uuid             not null
@@ -44,6 +45,7 @@
 #  index_conversations_on_identifier_and_account_id   (identifier,account_id)
 #  index_conversations_on_inbox_id                    (inbox_id)
 #  index_conversations_on_priority                    (priority)
+#  index_conversations_on_resolved_at                 (resolved_at)
 #  index_conversations_on_status_and_account_id       (status,account_id)
 #  index_conversations_on_status_and_priority         (status,priority)
 #  index_conversations_on_team_id                     (team_id)
@@ -226,11 +228,17 @@ class Conversation < ApplicationRecord
   end
 
   def handle_resolved_status_change
-    # When conversation is resolved, clear waiting_since using update_column to avoid callbacks
-    return unless saved_change_to_status? && status == 'resolved'
+    return unless saved_change_to_status?
 
     # rubocop:disable Rails/SkipsModelValidations
-    update_column(:waiting_since, nil)
+    if status == 'resolved'
+      # When conversation is resolved, clear waiting_since and stamp resolved_at
+      # using update_columns to avoid callbacks
+      update_columns(waiting_since: nil, resolved_at: Time.current)
+    elsif resolved_at.present?
+      # Conversation left the resolved state (reopened / pending / snoozed)
+      update_column(:resolved_at, nil)
+    end
     # rubocop:enable Rails/SkipsModelValidations
   end
 

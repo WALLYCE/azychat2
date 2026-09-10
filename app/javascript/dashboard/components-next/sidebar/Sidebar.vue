@@ -73,7 +73,7 @@ const toggleShortcutModalFn = show => {
 
 useSidebarKeyboardShortcuts(toggleShortcutModalFn);
 
-const expandedItem = ref(null);
+const expandedItem = ref('Conversation');
 
 const setExpandedItem = name => {
   expandedItem.value = expandedItem.value === name ? null : name;
@@ -225,7 +225,6 @@ const newReportRoutes = () => [
 const reportRoutes = computed(() => newReportRoutes());
 
 const menuItems = computed(() => {
-  console.log('[SIDEBAR] isAdmin:', isAdmin.value, 'role:', currentRole.value);
   return [
     ...(isAdmin.value
       ? [
@@ -335,6 +334,17 @@ const menuItems = computed(() => {
           : []),
       ],
     },
+    ...(isAdmin.value
+      ? [
+          {
+            name: 'Conversation History',
+            label: t('SIDEBAR.CONVERSATION_HISTORY'),
+            icon: 'i-lucide-history',
+            to: accountScopedRoute('conversation_history_index'),
+            activeOn: ['conversation_history_index'],
+          },
+        ]
+      : []),
     ...(isAdmin.value
       ? [
           {

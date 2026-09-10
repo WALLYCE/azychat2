@@ -51,6 +51,13 @@ const actionMenuItems = computed(() => {
     value: 'send_transcript',
   });
 
+  items.push({
+    icon: 'i-lucide-file-down',
+    label: t('CONTACT_PANEL.DOWNLOAD_PDF_TRANSCRIPT'),
+    action: 'download_pdf_transcript',
+    value: 'download_pdf_transcript',
+  });
+
   return items;
 });
 
@@ -65,6 +72,16 @@ const handleActionClick = ({ action }) => {
     useAlert(t('CONTACT_PANEL.UNMUTED_SUCCESS'));
   } else if (action === 'send_transcript') {
     toggleEmailModal();
+  } else if (action === 'download_pdf_transcript') {
+    downloadPdfTranscript();
+  }
+};
+
+const downloadPdfTranscript = async () => {
+  try {
+    await store.dispatch('downloadPdfTranscript', currentChat.value.id);
+  } catch (error) {
+    useAlert(t('CONTACT_PANEL.DOWNLOAD_PDF_TRANSCRIPT_ERROR'));
   }
 };
 

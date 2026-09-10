@@ -2,6 +2,8 @@
 import { mapGetters } from 'vuex';
 import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useAccount } from 'dashboard/composables/useAccount';
+import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useMapGetter } from 'dashboard/composables/store';
 import ChatList from '../../../components/ChatList.vue';
 import ConversationBox from '../../../components/widgets/conversation/ConversationBox.vue';
 import wootConstants from 'dashboard/constants/globals';
@@ -55,12 +57,17 @@ export default {
   },
   setup() {
     const { uiSettings, updateUISettings } = useUISettings();
-    const { accountId } = useAccount();
+    const { accountId, accountScopedRoute } = useAccount();
+    const { isAdmin } = useAdmin();
+    const teams = useMapGetter('teams/getMyTeams');
 
     return {
       uiSettings,
       updateUISettings,
       accountId,
+      accountScopedRoute,
+      isAdmin,
+      teams,
     };
   },
   data() {
@@ -73,6 +80,9 @@ export default {
       chatList: 'getAllConversations',
       currentChat: 'getSelectedChat',
     }),
+    showTeamPicker() {
+      return !this.isAdmin && !this.teamId && !this.inboxId;
+    },
     showConversationList() {
       return this.isOnExpandedLayout ? !this.conversationId : true;
     },
@@ -196,24 +206,51 @@ export default {
 
 <template>
   <section class="flex w-full h-full min-w-0">
-    <ChatList
-      :show-conversation-list="showConversationList"
-      :conversation-inbox="inboxId"
-      :label="label"
-      :team-id="teamId"
-      :conversation-type="conversationType"
-      :folders-id="foldersId"
-      :is-on-expanded-layout="isOnExpandedLayout"
-      @conversation-load="onConversationLoad"
-    />
-    <ConversationBox
-      v-if="showMessageView"
-      :inbox-id="inboxId"
-      :is-on-expanded-layout="isOnExpandedLayout"
+    <div
+      v-if="showTeamPicker"
+      class="flex flex-col items-center justify-center w-full h-full gap-6 bg-n-surface-1"
     >
-      <SidepanelSwitch v-if="currentChat.id" />
-    </ConversationBox>
-    <ConversationSidebar v-if="shouldShowSidebar" :current-chat="currentChat" />
+      <div class="flex flex-col items-center gap-2 text-center">
+        <span class="i-lucide-users text-n-slate-9 size-12" />
+        <h2 class="text-lg font-semibold text-n-slate-12">
+          Selecione um time
+        </h2>
+        <p class="text-sm text-n-slate-10">
+          Escolha um time para ver as conversas
+        </p>
+      </div>
+      <div class="flex flex-col gap-2 w-64">
+        <router-link
+          v-for="team in teams"
+          :key="team.id"
+          :to="accountScopedRoute('team_conversations', { teamId: team.id })"
+          class="flex items-center gap-3 px-4 py-3 rounded-lg border border-n-weak bg-n-background hover:bg-n-alpha-2 transition-colors text-n-slate-12 no-underline"
+        >
+          <span class="i-lucide-users size-4 text-n-slate-9" />
+          <span class="text-sm font-medium">{{ team.name }}</span>
+        </router-link>
+      </div>
+    </div>
+    <template v-else>
+      <ChatList
+        :show-conversation-list="showConversationList"
+        :conversation-inbox="inboxId"
+        :label="label"
+        :team-id="teamId"
+        :conversation-type="conversationType"
+        :folders-id="foldersId"
+        :is-on-expanded-layout="isOnExpandedLayout"
+        @conversation-load="onConversationLoad"
+      />
+      <ConversationBox
+        v-if="showMessageView"
+        :inbox-id="inboxId"
+        :is-on-expanded-layout="isOnExpandedLayout"
+      >
+        <SidepanelSwitch v-if="currentChat.id" />
+      </ConversationBox>
+      <ConversationSidebar v-if="shouldShowSidebar" :current-chat="currentChat" />
+    </template>
     <CmdBarConversationSnooze />
   </section>
 </template>

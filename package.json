@@ -85,6 +85,7 @@
     "mitt": "^3.0.1",
     "opus-recorder": "^8.0.5",
     "pinia": "^3.0.4",
+    "puppeteer-core": "^23.11.1",
     "qrcode": "^1.5.4",
     "semver": "7.6.3",
     "snakecase-keys": "^8.0.1",

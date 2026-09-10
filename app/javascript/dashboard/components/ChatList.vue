@@ -388,7 +388,7 @@ function belongsToTab(conversation, tabKey) {
   }
 
   if (tabKey === 'unassigned') {
-    if (props.teamId) {
+    if (props.teamId || isAdmin.value) {
       return isPendingTeamWithoutAgent(conversation);
     }
     return isPendingFromMyTeams(conversation);
@@ -895,7 +895,7 @@ async function fetchTab(tabKey, { append = false } = {}) {
       allowedTeamIds: allowedTeamIds.value,
     });
 
-    if (tabKey === 'unassigned' && !isAdmin.value && !props.teamId) {
+    if (tabKey === 'unassigned' && !props.teamId) {
       const { rows, hasEndReached, lastScannedPage } =
         await fetchPendingForAllowedTeams(nextPage);
 

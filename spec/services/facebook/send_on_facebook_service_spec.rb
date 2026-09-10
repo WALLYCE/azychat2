@@ -72,9 +72,7 @@ describe Facebook::SendOnFacebookService do
         described_class.new(message: message).perform
         expect(bot).to have_received(:deliver).with({
                                                       recipient: { id: contact_inbox.source_id },
-                                                      message: { text: message.content },
-                                                      messaging_type: 'MESSAGE_TAG',
-                                                      tag: 'ACCOUNT_UPDATE'
+                                                      message: { text: message.content }
                                                     }, { page_id: facebook_channel.page_id })
         expect(bot).to have_received(:deliver).with({
                                                       recipient: { id: contact_inbox.source_id },
@@ -85,9 +83,7 @@ describe Facebook::SendOnFacebookService do
                                                             url: 'url1'
                                                           }
                                                         }
-                                                      },
-                                                      messaging_type: 'MESSAGE_TAG',
-                                                      tag: 'ACCOUNT_UPDATE'
+                                                      }
                                                     }, { page_id: facebook_channel.page_id })
       end
 
@@ -200,9 +196,7 @@ describe Facebook::SendOnFacebookService do
                                                           { content_type: 'text', payload: 'text 1', title: 'text 1' },
                                                           { content_type: 'text', payload: 'text 2', title: 'text 2' }
                                                         ]
-                                                      },
-                                                      messaging_type: 'MESSAGE_TAG',
-                                                      tag: 'ACCOUNT_UPDATE'
+                                                      }
                                                     }, { page_id: facebook_channel.page_id })
       end
     end

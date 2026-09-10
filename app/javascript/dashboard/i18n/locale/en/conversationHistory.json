@@ -1,0 +1,63 @@
+{
+  "CONVERSATION_HISTORY": {
+    "HEADER_TITLE": "Conversation History",
+    "HEADER_DESCRIPTION": "Browse the conversation history of a team or an individual agent.",
+    "SCOPE": {
+      "TEAM": "Team",
+      "AGENT": "User"
+    },
+    "SELECT_TEAM_PLACEHOLDER": "Select a team",
+    "SELECT_AGENT_PLACEHOLDER": "Select a user",
+    "EMPTY": {
+      "NO_SELECTION_TITLE": "Nothing selected yet",
+      "NO_SELECTION_SUBTITLE": "Pick a team or a user above to see their conversation history.",
+      "NO_MEMBERS": "This team has no members.",
+      "NO_AGENT": "This user could not be found."
+    },
+    "CARD": {
+      "VIEW_HISTORY": "View history"
+    },
+    "MODAL": {
+      "TITLE": "{name} · Conversation history",
+      "SHOWING_LATEST": "Showing the latest {count} conversations. Use the filters to find others.",
+      "EMPTY": "No conversations found.",
+      "LOAD_MORE": "Load more",
+      "LOADING": "Loading…",
+      "FILTERS": {
+        "CONVERSATION_ID": "Conversation ID",
+        "CONVERSATION_ID_PLACEHOLDER": "e.g. 1234",
+        "STATUS": "Status",
+        "OPENED_FROM": "Opened from",
+        "OPENED_TO": "Opened to",
+        "RESOLVED_FROM": "Resolved from",
+        "RESOLVED_TO": "Resolved to",
+        "APPLY": "Apply filters",
+        "CLEAR": "Clear"
+      },
+      "TABLE": {
+        "ID": "ID",
+        "CONTACT": "Contact",
+        "STATUS": "Status",
+        "OPENED_AT": "Opened",
+        "RESOLVED_AT": "Resolved",
+        "NOT_RESOLVED": "—"
+      }
+    },
+    "STATUS": {
+      "ALL": "All",
+      "OPEN": "Open",
+      "RESOLVED": "Resolved",
+      "PENDING": "Pending",
+      "SNOOZED": "Snoozed"
+    },
+    "TRANSCRIPT": {
+      "TITLE": "Conversation #{id}",
+      "READ_ONLY_NOTICE": "Read-only view — you can't send or receive messages here.",
+      "EMPTY": "This conversation has no messages.",
+      "LOAD_PREVIOUS": "Load previous messages",
+      "PRIVATE_NOTE": "Private note",
+      "ACTIVITY": "Activity"
+    },
+    "ERROR": "Something went wrong while loading the conversation history."
+  }
+}

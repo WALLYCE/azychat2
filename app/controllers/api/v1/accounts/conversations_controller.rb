@@ -78,6 +78,12 @@ class Api::V1::Accounts::ConversationsController < Api::V1::Accounts::BaseContro
     head :ok
   end
 
+  def pdf_transcript
+    pdf = Conversations::PdfTranscriptBuilder.new(@conversation).render
+
+    send_data pdf, filename: "conversation-#{@conversation.display_id}.pdf", type: 'application/pdf', disposition: 'attachment'
+  end
+
   def toggle_status
     # FIXME: move this logic into a service object
     if pending_to_open_by_bot?

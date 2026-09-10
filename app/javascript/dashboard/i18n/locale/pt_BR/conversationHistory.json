@@ -1,0 +1,63 @@
+{
+  "CONVERSATION_HISTORY": {
+    "HEADER_TITLE": "Histórico de Conversas",
+    "HEADER_DESCRIPTION": "Consulte o histórico de conversas de uma equipe ou de um agente específico.",
+    "SCOPE": {
+      "TEAM": "Equipe",
+      "AGENT": "Usuário"
+    },
+    "SELECT_TEAM_PLACEHOLDER": "Selecione uma equipe",
+    "SELECT_AGENT_PLACEHOLDER": "Selecione um usuário",
+    "EMPTY": {
+      "NO_SELECTION_TITLE": "Nada selecionado ainda",
+      "NO_SELECTION_SUBTITLE": "Escolha uma equipe ou um usuário acima para ver o histórico de conversas.",
+      "NO_MEMBERS": "Esta equipe não tem membros.",
+      "NO_AGENT": "Não foi possível encontrar este usuário."
+    },
+    "CARD": {
+      "VIEW_HISTORY": "Ver histórico"
+    },
+    "MODAL": {
+      "TITLE": "{name} · Histórico de conversas",
+      "SHOWING_LATEST": "Exibindo as últimas {count} conversas. Use os filtros para encontrar outras.",
+      "EMPTY": "Nenhuma conversa encontrada.",
+      "LOAD_MORE": "Carregar mais",
+      "LOADING": "Carregando…",
+      "FILTERS": {
+        "CONVERSATION_ID": "ID da conversa",
+        "CONVERSATION_ID_PLACEHOLDER": "ex.: 1234",
+        "STATUS": "Status",
+        "OPENED_FROM": "Aberta de",
+        "OPENED_TO": "Aberta até",
+        "RESOLVED_FROM": "Resolvida de",
+        "RESOLVED_TO": "Resolvida até",
+        "APPLY": "Aplicar filtros",
+        "CLEAR": "Limpar"
+      },
+      "TABLE": {
+        "ID": "ID",
+        "CONTACT": "Contato",
+        "STATUS": "Status",
+        "OPENED_AT": "Aberta em",
+        "RESOLVED_AT": "Resolvida em",
+        "NOT_RESOLVED": "—"
+      }
+    },
+    "STATUS": {
+      "ALL": "Todas",
+      "OPEN": "Aberta",
+      "RESOLVED": "Resolvida",
+      "PENDING": "Pendente",
+      "SNOOZED": "Adiada"
+    },
+    "TRANSCRIPT": {
+      "TITLE": "Conversa #{id}",
+      "READ_ONLY_NOTICE": "Visualização somente leitura — não é possível enviar ou receber mensagens aqui.",
+      "EMPTY": "Esta conversa não tem mensagens.",
+      "LOAD_PREVIOUS": "Carregar mensagens anteriores",
+      "PRIVATE_NOTE": "Nota privada",
+      "ACTIVITY": "Atividade"
+    },
+    "ERROR": "Ocorreu um erro ao carregar o histórico de conversas."
+  }
+}

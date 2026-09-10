@@ -113,6 +113,12 @@ class ConversationApi extends ApiClient {
     return axios.post(`${this.url}/${conversationId}/transcript`, { email });
   }
 
+  downloadPdfTranscript(conversationId) {
+    return axios.get(`${this.url}/${conversationId}/pdf_transcript`, {
+      responseType: 'blob',
+    });
+  }
+
   updateCustomAttributes({ conversationId, customAttributes }) {
     return axios.post(`${this.url}/${conversationId}/custom_attributes`, {
       custom_attributes: customAttributes,

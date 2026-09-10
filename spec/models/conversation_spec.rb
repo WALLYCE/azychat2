@@ -313,6 +313,32 @@ RSpec.describe Conversation do
     end
   end
 
+  describe 'resolved_at' do
+    it 'stamps resolved_at when the conversation is resolved' do
+      conversation = create(:conversation, status: 'open')
+      freeze_time do
+        conversation.update(status: :resolved)
+        expect(conversation.reload.resolved_at).to eq(Time.current)
+      end
+    end
+
+    it 'clears resolved_at when a resolved conversation is reopened' do
+      conversation = create(:conversation, status: 'open')
+      conversation.update(status: :resolved)
+      expect(conversation.reload.resolved_at).not_to be_nil
+
+      conversation.update(status: :open)
+      expect(conversation.reload.resolved_at).to be_nil
+    end
+
+    it 'clears resolved_at when a resolved conversation is snoozed' do
+      conversation = create(:conversation, status: 'open')
+      conversation.update(status: :resolved)
+      conversation.update(status: :snoozed, snoozed_until: 1.day.from_now)
+      expect(conversation.reload.resolved_at).to be_nil
+    end
+  end
+
   describe '#bot_handoff!' do
     let(:conversation) { create(:conversation, status: :pending) }
 

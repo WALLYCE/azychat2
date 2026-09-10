@@ -65,7 +65,6 @@ export const getters = {
     const [currentAccount = {}] = accounts.filter(
       account => account.id === accountId
     );
-    console.log('[AUTH] getCurrentRole - accountId:', accountId, 'accounts:', accounts.map(a => ({ id: a.id, role: a.role })), 'resolved role:', currentAccount.role);
     return currentAccount.role;
   },
 

@@ -490,6 +490,20 @@ const actions = {
     await ConversationApi.sendEmailTranscript({ conversationId, email });
   },
 
+  downloadPdfTranscript: async (_, conversationId) => {
+    const response = await ConversationApi.downloadPdfTranscript(conversationId);
+    const blobUrl = window.URL.createObjectURL(
+      new Blob([response.data], { type: 'application/pdf' })
+    );
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = `conversation-${conversationId}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  },
+
   updateCustomAttributes: async (
     { commit },
     { conversationId, customAttributes }

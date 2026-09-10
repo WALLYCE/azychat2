@@ -50,6 +50,8 @@
     "MUTED_SUCCESS": "Este contacto está bloqueado. Não será notificado de nenhuma conversa futura.",
     "UNMUTED_SUCCESS": "Este contacto foi desbloqueado.",
     "SEND_TRANSCRIPT": "Enviar transcrição",
+    "DOWNLOAD_PDF_TRANSCRIPT": "Descarregar em PDF",
+    "DOWNLOAD_PDF_TRANSCRIPT_ERROR": "Ocorreu um erro ao gerar o PDF, tente novamente",
     "EDIT_LABEL": "Editar",
     "SIDEBAR_SECTIONS": {
       "CUSTOM_ATTRIBUTES": "Atributos personalizados",
